@@ -1,9 +1,9 @@
 ---
 name: youdaonote
-description: "有道云笔记全能工具：笔记管理（创建、搜索、浏览、读取）、待办管理（创建、完成、分组）、网页剪藏（服务端抓取）。当用户需要操作有道云笔记时使用此 Skill。"
+description: '有道云笔记全能工具：笔记管理（创建、搜索、浏览、读取）、待办管理（创建、完成、分组）、网页剪藏（服务端抓取）。当用户需要操作有道云笔记时使用此 Skill。'
 official: true
 version: 1.0.3
-minCliVersion: "1.2.0"
+minCliVersion: '1.2.0'
 ---
 
 # YoudaoNote — 有道云笔记
@@ -13,37 +13,38 @@ minCliVersion: "1.2.0"
 ## 前置条件（Agent 自动处理）
 
 执行任何操作前，Agent 必须先运行 `youdaonote list` 检测 CLI 是否可用：
+
 - **`command not found`** → 立即跳转「CLI 未安装处理」自动安装，**禁止只展示安装步骤让用户手动操作**
 - **API Key 错误** → 提示用户访问 **https://mopen.163.com** 获取 API Key（须使用手机号登录，且云笔记账号已绑定手机号），然后执行 `youdaonote config set apiKey <用户提供的Key>`。**获取 API Key 的地址只有这一个，禁止告知用户其他地址。**
 - **正常返回目录列表** → 运行 `youdaonote version`，若版本低于 `1.2.0`，展示升级建议后继续执行；否则可运行 `youdaonote help --json` 获取当前 CLI 全部能力的结构化描述（JSON），用于确认命令是否可用，下方速查表作为 fallback
 
 ## 命令速查
 
-| 命令 | 用途 | 示例 |
-|------|------|------|
-| `save` | 保存笔记（✅ 推荐，支持 Markdown 富文本） | `youdaonote save --file note.json` |
-| `create` | 创建笔记（⚠️ 仅纯文本，不支持 Markdown 富文本） | `youdaonote create -n "标题" -c "内容" [-f <目录ID>]` |
-| `update` | 更新 Markdown 笔记 | `youdaonote update <fileId> -c "内容"` 或 `--file content.md` |
-| `delete` | 删除笔记 | `youdaonote delete <fileId>` |
-| `rename` | 重命名笔记 | `youdaonote rename <fileId> "新标题"` |
-| `move` | 移动笔记 | `youdaonote move <fileId> <目录ID>` |
-| `search` | 搜索笔记 | `youdaonote search "关键词"` |
-| `list` | 浏览目录 | `youdaonote list -f <目录ID>` |
-| `read` | 读取笔记 | `youdaonote read <fileId>` |
-| `recent` | 最近收藏 | `youdaonote recent -l 20 -c --json` |
-| `clip` | 网页剪藏（服务端） | `youdaonote clip "https://..." [-f <目录ID>] --json` |
-| `clip-save` | 保存外部剪藏 JSON | `youdaonote clip-save --file data.json` |
-| `todo list` | 列出待办 | `youdaonote todo list [--group <分组ID>] --json` |
-| `todo create` | 创建待办 | `youdaonote todo create -t "标题" [-c "内容"] [-d 2025-12-31] [-g <分组ID>]` |
-| `todo update` | 更新待办 | `youdaonote todo update <todoId> [--done] [--undone] [-t "新标题"]` |
-| `todo delete` | 删除待办 | `youdaonote todo delete <todoId>` |
-| `todo groups` | 列出待办分组 | `youdaonote todo groups --json` |
-| `todo group-create` | 创建分组 | `youdaonote todo group-create "分组名"` |
-| `todo group-rename` | 重命名分组 | `youdaonote todo group-rename <groupId> "新名"` |
-| `todo group-delete` | 删除分组 | `youdaonote todo group-delete <groupId>` |
-| `check` | 健康检查 | `youdaonote check` |
-| `config show` | 查看配置 | `youdaonote config show --json` |
-| `config set` | 设置配置 | `youdaonote config set apiKey YOUR_KEY` |
+| 命令                | 用途                                            | 示例                                                                         |
+| ------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------- |
+| `save`              | 保存笔记（✅ 推荐，支持 Markdown 富文本）       | `youdaonote save --file note.json`                                           |
+| `create`            | 创建笔记（⚠️ 仅纯文本，不支持 Markdown 富文本） | `youdaonote create -n "标题" -c "内容" [-f <目录ID>]`                        |
+| `update`            | 更新 Markdown 笔记                              | `youdaonote update <fileId> -c "内容"` 或 `--file content.md`                |
+| `delete`            | 删除笔记                                        | `youdaonote delete <fileId>`                                                 |
+| `rename`            | 重命名笔记                                      | `youdaonote rename <fileId> "新标题"`                                        |
+| `move`              | 移动笔记                                        | `youdaonote move <fileId> <目录ID>`                                          |
+| `search`            | 搜索笔记                                        | `youdaonote search "关键词"`                                                 |
+| `list`              | 浏览目录                                        | `youdaonote list -f <目录ID>`                                                |
+| `read`              | 读取笔记                                        | `youdaonote read <fileId>`                                                   |
+| `recent`            | 最近收藏                                        | `youdaonote recent -l 20 -c --json`                                          |
+| `clip`              | 网页剪藏（服务端）                              | `youdaonote clip "https://..." [-f <目录ID>] --json`                         |
+| `clip-save`         | 保存外部剪藏 JSON                               | `youdaonote clip-save --file data.json`                                      |
+| `todo list`         | 列出待办                                        | `youdaonote todo list [--group <分组ID>] --json`                             |
+| `todo create`       | 创建待办                                        | `youdaonote todo create -t "标题" [-c "内容"] [-d 2025-12-31] [-g <分组ID>]` |
+| `todo update`       | 更新待办                                        | `youdaonote todo update <todoId> [--done] [--undone] [-t "新标题"]`          |
+| `todo delete`       | 删除待办                                        | `youdaonote todo delete <todoId>`                                            |
+| `todo groups`       | 列出待办分组                                    | `youdaonote todo groups --json`                                              |
+| `todo group-create` | 创建分组                                        | `youdaonote todo group-create "分组名"`                                      |
+| `todo group-rename` | 重命名分组                                      | `youdaonote todo group-rename <groupId> "新名"`                              |
+| `todo group-delete` | 删除分组                                        | `youdaonote todo group-delete <groupId>`                                     |
+| `check`             | 健康检查                                        | `youdaonote check`                                                           |
+| `config show`       | 查看配置                                        | `youdaonote config show --json`                                              |
+| `config set`        | 设置配置                                        | `youdaonote config set apiKey YOUR_KEY`                                      |
 
 ## 笔记管理
 
@@ -78,6 +79,7 @@ B  保存为有道专有格式（.note）
   ```
 
 > `parentId` 为可选字段：填写 `youdaonote list` 返回的文件夹 ID 可指定目标目录；不填则默认存入「我的资源/收藏笔记」。
+
 - **用户未明确选择**（回复"随便"/"你决定"等）：默认选 A
 
 ### 创建 / 保存
@@ -117,6 +119,7 @@ youdaonote clip "https://example.com/article" -f <目录ID> --json  # 保存到�
 收到 `command not found` 时，Agent **立即执行**安装命令，禁止只展示步骤让用户操作。
 
 **macOS / Linux / WSL**：
+
 ```bash
 curl -fsSL https://artifact.lx.netease.com/download/youdaonote-cli/install.sh | bash -s -- -f -b ~/.local/bin
 export PATH="$HOME/.local/bin:$PATH"
@@ -124,6 +127,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 **Windows（CMD/PowerShell）**：不支持一键安装，告知用户下载预编译包：
+
 - x64：https://artifact.lx.netease.com/download/youdaonote-cli/youdaonote-cli-windows-x64.tar.gz
 - ARM64：https://artifact.lx.netease.com/download/youdaonote-cli/youdaonote-cli-windows-arm64.tar.gz
 
@@ -131,10 +135,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 运行 `youdaonote check --json`，根据 `status: "fail"` 的项执行：
 
-| 失败项 | 处理动作 |
-|--------|---------|
-| `config-file` / `api-key` | `youdaonote config set apiKey YOUR_KEY` |
-| `mcp-connection` | API Key 有效但网络不通，提示用户检查网络或稍后重试 |
+| 失败项                    | 处理动作                                           |
+| ------------------------- | -------------------------------------------------- |
+| `config-file` / `api-key` | `youdaonote config set apiKey YOUR_KEY`            |
+| `mcp-connection`          | API Key 有效但网络不通，提示用户检查网络或稍后重试 |
 
 ## 注意事项
 
