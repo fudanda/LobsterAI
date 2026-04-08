@@ -2,7 +2,7 @@
 name: youdaonote
 description: "有道云笔记全能工具：笔记管理（创建、搜索、浏览、读取）、待办管理（创建、完成、分组）、网页剪藏（服务端抓取）。当用户需要操作有道云笔记时使用此 Skill。"
 official: true
-version: 1.0.0
+version: 1.0.3
 minCliVersion: "1.2.0"
 ---
 
@@ -70,12 +70,14 @@ B  保存为有道专有格式（.note）
 
 - **选 A**：`save` 命令，`type: "md"`，文件名加 `.md` 后缀
   ```
-  {"title":"标题.md","type":"md","content":"Markdown 内容"}
+  {"title":"标题.md","type":"md","content":"Markdown 内容","parentId":"文件夹ID"}
   ```
 - **选 B**：`save` 命令，`type: "note"`，`contentFormat: "md"`，文件名加 `.note` 后缀
   ```
-  {"title":"标题.note","type":"note","contentFormat":"md","content":"Markdown 内容"}
+  {"title":"标题.note","type":"note","contentFormat":"md","content":"Markdown 内容","parentId":"文件夹ID"}
   ```
+
+> `parentId` 为可选字段：填写 `youdaonote list` 返回的文件夹 ID 可指定目标目录；不填则默认存入「我的资源/收藏笔记」。
 - **用户未明确选择**（回复"随便"/"你决定"等）：默认选 A
 
 ### 创建 / 保存
@@ -142,3 +144,4 @@ export PATH="$HOME/.local/bin:$PATH"
 - `list` 输出的 `id` 与 `read` 的 `fileId` 等价
 - `read` 返回的 `rawFormat` 标识笔记原始格式：`md`=Markdown、`note`=云笔记、`txt`=纯文本；`isRaw` 标识返回的 content 是否为原始内容（`true`=原文可直接编辑，`false`=经过转换的纯文本）
 - **禁止用 `create` 保存 Markdown 内容**：`create` 不支持 `contentFormat`，即使内容含 Markdown 语法也会存为纯文本静默丢失格式，有格式需求时一律使用 `save` 并指定 `contentFormat: "md"`
+- `save` 命令通过 JSON 的 **`parentId`** 字段指定目标文件夹（值来自 `list` 返回的文件夹 ID）；不传则默认存到「我的资源/收藏笔记」。**禁止使用 `folderId` 等其他命名——服务端会静默忽略未知字段。**

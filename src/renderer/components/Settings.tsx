@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import Modal from './common/Modal';
 import { configService } from '../services/config';
 import { apiService } from '../services/api';
-import { checkForAppUpdate } from '../services/appUpdate';
 import type { AppUpdateInfo } from '../services/appUpdate';
 import { themeService } from '../services/theme';
 import { i18nService, LanguageType } from '../services/i18n';
@@ -51,6 +50,24 @@ import {
 } from './icons/providers';
 
 type TabType = 'general'| 'coworkAgentEngine' | 'model' | 'coworkMemory' | 'coworkAgent' | 'shortcuts' | 'im' | 'email' | 'about';
+
+/** Settings sidebar: Agent engine & shortcuts tabs hidden (remove from set to restore). */
+const SettingsSidebarHiddenTab = {
+  CoworkAgentEngine: 'coworkAgentEngine',
+  Shortcuts: 'shortcuts',
+} as const satisfies Record<string, TabType>;
+
+const settingsSidebarHiddenTabSet = new Set<TabType>([
+  SettingsSidebarHiddenTab.CoworkAgentEngine,
+  SettingsSidebarHiddenTab.Shortcuts,
+]);
+
+function resolveSettingsVisibleTab(tab: TabType | undefined): TabType {
+  if (tab && !settingsSidebarHiddenTabSet.has(tab)) {
+    return tab;
+  }
+  return 'general';
+}
 
 export type SettingsOpenOptions = {
   initialTab?: TabType;
@@ -189,11 +206,6 @@ const normalizeBaseUrl = (baseUrl: string): string => baseUrl.trim().replace(/\/
 const normalizeApiFormat = (value: unknown): 'anthropic' | 'openai' => (
   value === 'openai' ? 'openai' : 'anthropic'
 );
-const ABOUT_CONTACT_EMAIL = 'lobsterai.project@rd.netease.com';
-const ABOUT_USER_MANUAL_URL = 'https://lobsterai.youdao.com/#/docs/lobsterai_user_manual';
-const ABOUT_USER_COMMUNITY_URL = 'https://lobsterai.youdao.com/#/about';
-const ABOUT_SERVICE_TERMS_URL = 'https://c.youdao.com/dict/hardware/lobsterai/lobsterai_service.html';
-
 // MiniMax Portal OAuth constants
 const MINIMAX_OAUTH_CLIENT_ID = '78257093-7e40-4613-99e0-527b14b39113';
 const MINIMAX_OAUTH_SCOPE = 'group_id profile model.completion';
@@ -228,40 +240,6 @@ async function generateMiniMaxPkce(): Promise<{ verifier: string; challenge: str
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   return { verifier, challenge, state };
 }
-
-const copyTextFallback = (text: string): boolean => {
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'fixed';
-  textarea.style.opacity = '0';
-  textarea.style.pointerEvents = 'none';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, text.length);
-  const copied = document.execCommand('copy');
-  document.body.removeChild(textarea);
-  return copied;
-};
-
-const copyTextToClipboard = async (text: string): Promise<boolean> => {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (clipboardError) {
-      console.warn('Navigator clipboard write failed, trying fallback:', clipboardError);
-    }
-  }
-
-  try {
-    return copyTextFallback(text);
-  } catch (fallbackError) {
-    console.error('Fallback clipboard copy failed:', fallbackError);
-    return false;
-  }
-};
 
 const getFixedApiFormatForProvider = (provider: string): 'anthropic' | 'openai' | 'gemini' | null => {
   if (provider === 'openai' || provider === 'stepfun') {
@@ -500,10 +478,10 @@ const ShortcutRecorder: React.FC<{ value: string; onChange: (v: string) => void 
   );
 };
 
-const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, noticeI18nKey, noticeExtra, onUpdateFound, enterpriseConfig }) => {
+const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, noticeI18nKey, noticeExtra, onUpdateFound: _onUpdateFound, enterpriseConfig }) => {
   const dispatch = useDispatch();
   // 状态
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'general');
+  const [activeTab, setActiveTab] = useState<TabType>(() => resolveSettingsVisibleTab(initialTab));
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [themeId, setThemeId] = useState<string>(themeService.getThemeId());
   const [language, setLanguage] = useState<LanguageType>('zh');
@@ -554,9 +532,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   // 创建引用来确保内容区域的滚动
   const contentRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const emailCopiedTimerRef = useRef<number | null>(null);
-  const updateCheckTimerRef = useRef<number | null>(null);
-  
+
   // 快捷键设置
   const [shortcuts, setShortcuts] = useState({
     newChat: 'Ctrl+N',
@@ -582,12 +558,9 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
 
   // About tab
   const [appVersion, setAppVersion] = useState('');
-  const [emailCopied, setEmailCopied] = useState(false);
-  const [isExportingLogs, setIsExportingLogs] = useState(false);
   const [testMode, setTestMode] = useState(false);
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [testModeUnlocked, setTestModeUnlocked] = useState(false);
-  const [updateCheckStatus, setUpdateCheckStatus] = useState<'idle' | 'checking' | 'upToDate' | 'error'>('idle');
 
   useEffect(() => {
     window.electron.appInfo.getVersion().then(setAppVersion);
@@ -596,97 +569,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
   useEffect(() => {
     setShowApiKey(false);
   }, [activeProvider]);
-
-  const handleCopyContactEmail = useCallback(async () => {
-    const copied = await copyTextToClipboard(ABOUT_CONTACT_EMAIL);
-    if (copied) {
-      setEmailCopied(true);
-      if (emailCopiedTimerRef.current != null) {
-        window.clearTimeout(emailCopiedTimerRef.current);
-      }
-      emailCopiedTimerRef.current = window.setTimeout(() => {
-        setEmailCopied(false);
-        emailCopiedTimerRef.current = null;
-      }, 1200);
-    }
-  }, []);
-
-  const handleCheckUpdate = useCallback(async () => {
-    if (updateCheckStatus === 'checking' || !appVersion) return;
-    setUpdateCheckStatus('checking');
-    try {
-      const info = await checkForAppUpdate(appVersion, true);
-      if (info) {
-        setUpdateCheckStatus('idle');
-        onUpdateFound?.(info);
-      } else {
-        setUpdateCheckStatus('upToDate');
-        if (updateCheckTimerRef.current != null) {
-          window.clearTimeout(updateCheckTimerRef.current);
-        }
-        updateCheckTimerRef.current = window.setTimeout(() => {
-          setUpdateCheckStatus('idle');
-          updateCheckTimerRef.current = null;
-        }, 3000);
-      }
-    } catch {
-      setUpdateCheckStatus('error');
-      if (updateCheckTimerRef.current != null) {
-        window.clearTimeout(updateCheckTimerRef.current);
-      }
-      updateCheckTimerRef.current = window.setTimeout(() => {
-        setUpdateCheckStatus('idle');
-        updateCheckTimerRef.current = null;
-      }, 3000);
-    }
-  }, [appVersion, updateCheckStatus, onUpdateFound]);
-
-  const handleOpenUserManual = useCallback(() => {
-    void window.electron.shell.openExternal(ABOUT_USER_MANUAL_URL);
-  }, []);
-
-  const handleOpenUserCommunity = useCallback(() => {
-    void window.electron.shell.openExternal(ABOUT_USER_COMMUNITY_URL);
-  }, []);
-
-  const handleOpenServiceTerms = useCallback(() => {
-    void window.electron.shell.openExternal(ABOUT_SERVICE_TERMS_URL);
-  }, []);
-
-  const handleExportLogs = useCallback(async () => {
-    if (isExportingLogs) {
-      return;
-    }
-
-    setError(null);
-    setNoticeMessage(null);
-    setIsExportingLogs(true);
-    try {
-      const result = await window.electron.log.exportZip();
-      if (!result.success) {
-        setError(result.error || i18nService.t('aboutExportLogsFailed'));
-        return;
-      }
-      if (result.canceled) {
-        return;
-      }
-
-      if (result.path) {
-        await window.electron.shell.showItemInFolder(result.path);
-      }
-
-      if ((result.missingEntries?.length ?? 0) > 0) {
-        const missingList = result.missingEntries?.join(', ') || '';
-        setNoticeMessage(`${i18nService.t('aboutExportLogsPartial')}: ${missingList}`);
-      } else {
-        setNoticeMessage(i18nService.t('aboutExportLogsSuccess'));
-      }
-    } catch (exportError) {
-      setError(exportError instanceof Error ? exportError.message : i18nService.t('aboutExportLogsFailed'));
-    } finally {
-      setIsExportingLogs(false);
-    }
-  }, [isExportingLogs]);
 
   const coworkConfig = useSelector((state: RootState) => state.cowork.config);
 
@@ -715,15 +597,6 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
     coworkConfig.memoryEnabled,
     coworkConfig.memoryLlmJudgeEnabled,
   ]);
-
-  useEffect(() => () => {
-    if (emailCopiedTimerRef.current != null) {
-      window.clearTimeout(emailCopiedTimerRef.current);
-    }
-    if (updateCheckTimerRef.current != null) {
-      window.clearTimeout(updateCheckTimerRef.current);
-    }
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -988,7 +861,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
 
   useEffect(() => {
     if (initialTab) {
-      setActiveTab(initialTab);
+      setActiveTab(resolveSettingsVisibleTab(initialTab));
     }
   }, [initialTab]);
 
@@ -2298,6 +2171,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
 
   // 渲染标签页
   const sidebarTabs: { key: TabType; label: string; icon: React.ReactNode }[] = useMemo(() => {
+    // Full tab list; `settingsSidebarHiddenTabSet` omits Agent engine & shortcuts from the sidebar (see comment on SettingsSidebarHiddenTab).
     const allTabs = [
       { key: 'general' as TabType,        label: i18nService.t('general'),        icon: <Cog6ToothIcon className="h-5 w-5" /> },
       { key: 'coworkAgentEngine' as TabType, label: i18nService.t('coworkAgentEngine'), icon: <CpuChipIcon className="h-5 w-5" /> },
@@ -2309,19 +2183,25 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
       { key: 'shortcuts' as TabType,      label: i18nService.t('shortcuts'),      icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-5 w-5"><rect x="2" y="4" width="20" height="14" rx="2" /><line x1="6" y1="8" x2="8" y2="8" /><line x1="10" y1="8" x2="12" y2="8" /><line x1="14" y1="8" x2="16" y2="8" /><line x1="6" y1="12" x2="8" y2="12" /><line x1="10" y1="12" x2="14" y2="12" /><line x1="16" y1="12" x2="18" y2="12" /><line x1="8" y1="15.5" x2="16" y2="15.5" /></svg> },
       { key: 'about' as TabType,          label: i18nService.t('about'),          icon: <InformationCircleIcon className="h-5 w-5" /> },
     ];
+    let tabs = allTabs.filter((tab) => !settingsSidebarHiddenTabSet.has(tab.key));
     // Filter out tabs hidden by enterprise config
-    // Filter out tabs with 'hide' action in enterprise config
     // e.g., ui: { "settings.im": "hide" } → hide the 'im' tab
     const ui = enterpriseConfig?.ui;
     if (ui) {
-      return allTabs.filter(tab => ui[`settings.${tab.key}`] !== 'hide');
+      tabs = tabs.filter(tab => ui[`settings.${tab.key}`] !== 'hide');
     }
-    return allTabs;
+    return tabs;
   }, [language, enterpriseConfig]);
 
   const activeTabLabel = useMemo(() => {
     return sidebarTabs.find(t => t.key === activeTab)?.label ?? '';
   }, [activeTab, sidebarTabs]);
+
+  useEffect(() => {
+    if (sidebarTabs.length > 0 && !sidebarTabs.some((t) => t.key === activeTab)) {
+      setActiveTab(sidebarTabs[0]?.key ?? 'general');
+    }
+  }, [sidebarTabs, activeTab]);
 
   const renderTabContent = () => {
     switch(activeTab) {
@@ -2810,7 +2690,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                   {i18nService.t('modelProviders')}
                 </h3>
                 <div className="flex items-center space-x-1">
-                  <button
+                  {/* <button
                     type="button"
                     onClick={handleImportProvidersClick}
                     disabled={isImportingProviders || isExportingProviders}
@@ -2825,7 +2705,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                     className="inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
                   >
                     {i18nService.t('export')}
-                  </button>
+                  </button> */}
                 </div>
               </div>
               <input
@@ -3825,8 +3705,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
             {/* Logo & App Name */}
             <img
               src="logo.png"
-              alt="LobsterAI"
-              className="w-16 h-16 mb-3 cursor-pointer select-none"
+              alt="LZClaw"
+              className="w-24 h-auto mb-3 cursor-pointer select-none"
               onClick={() => {
                 const next = logoClickCount + 1;
                 setLogoClickCount(next);
@@ -3835,12 +3715,12 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 }
               }}
             />
-            <h3 className="text-lg font-semibold text-foreground">LobsterAI</h3>
+            {/* <h3 className="text-lg font-semibold text-foreground">LZClaw</h3> */}
             <span className="text-xs text-secondary mt-1">v{appVersion}</span>
 
             {/* Info Card */}
             <div className="w-full mt-8 rounded-xl border border-border overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              {/* <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <span className="text-sm text-foreground">{i18nService.t('aboutVersion')}</span>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-secondary">{appVersion}</span>
@@ -3866,8 +3746,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                   </span>
                   )}
                 </div>
-              </div>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              </div> */}
+              {/* <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <span className="text-sm text-foreground">{i18nService.t('aboutContactEmail')}</span>
                 <div className="flex items-center gap-2">
                   <button
@@ -3887,8 +3767,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                     </span>
                   )}
                 </div>
-              </div>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              </div> */}
+              {/* <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <span className="text-sm text-foreground">{i18nService.t('aboutUserManual')}</span>
                 <button
                   type="button"
@@ -3900,8 +3780,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 >
                   {ABOUT_USER_MANUAL_URL}
                 </button>
-              </div>
-              <div className={`flex items-center justify-between px-4 py-3${testModeUnlocked ? ' border-b border-border' : ''}`}>
+              </div> */}
+              {/* <div className={`flex items-center justify-between px-4 py-3${testModeUnlocked ? ' border-b border-border' : ''}`}>
                 <span className="text-sm text-foreground">{i18nService.t('aboutUserCommunity')}</span>
                 <button
                   type="button"
@@ -3913,8 +3793,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 >
                   {ABOUT_USER_COMMUNITY_URL}
                 </button>
-              </div>
-              {testModeUnlocked && (
+              </div> */}
+              {/* {testModeUnlocked && (
                 <div className="flex items-center justify-between px-4 py-3">
                   <span className="text-sm text-foreground">{i18nService.t('testMode')}</span>
                   <button
@@ -3933,11 +3813,11 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                     />
                   </button>
                 </div>
-              )}
+              )} */}
             </div>
 
             {/* Footer */}
-            <div className="mt-auto w-full pt-14 pb-2 flex flex-col items-center">
+            {/* <div className="mt-auto w-full pt-14 pb-2 flex flex-col items-center">
               <div className="flex items-center justify-center text-sm text-secondary">
                 <button
                   type="button"
@@ -3969,7 +3849,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
               <p className="mt-1 text-xs text-secondary">
                 Copyright &copy; {new Date().getFullYear()} NetEase Youdao. All Rights Reserved.
               </p>
-            </div>
+            </div> */}
           </div>
         );
 

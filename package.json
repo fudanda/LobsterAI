@@ -1,9 +1,9 @@
 {
-  "name": "lobsterai",
+  "name": "lzclaw",
   "private": true,
   "author": {
-    "name": "LobsterAI",
-    "email": "lobsterai.project@rd.netease.com"
+    "name": "LZClaw",
+    "email": "lzclaw.project@qq.com"
   },
   "license": "MIT",
   "version": "2026.4.3",
@@ -35,23 +35,6 @@
         "id": "openclaw-weixin",
         "npm": "@tencent-weixin/openclaw-weixin",
         "version": "1.0.3"
-      },
-      {
-        "id": "moltbot-popo",
-        "npm": "moltbot-popo",
-        "version": "1.0.66",
-        "registry": "https://npm.nie.netease.com",
-        "optional": true
-      },
-      {
-        "id": "openclaw-nim",
-        "npm": "openclaw-nim",
-        "version": "0.3.1"
-      },
-      {
-        "id": "openclaw-netease-bee",
-        "npm": "openclaw-netease-bee",
-        "version": "0.1.3"
       }
     ]
   },

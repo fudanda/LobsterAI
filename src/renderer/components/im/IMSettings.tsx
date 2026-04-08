@@ -3,28 +3,51 @@
  * Configuration UI for DingTalk, Feishu and Telegram IM bots
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { SignalIcon, XMarkIcon, CheckCircleIcon, XCircleIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
-import { RootState } from '../../store';
-import { imService } from '../../services/im';
-import { setDingTalkConfig, setDingTalkInstanceConfig, setFeishuConfig, setFeishuInstanceConfig, setTelegramOpenClawConfig, setQQConfig, setQQInstanceConfig, setDiscordConfig, setNimConfig, setNeteaseBeeChanConfig, setWecomConfig, setWeixinConfig, setPopoConfig, clearError } from '../../store/slices/imSlice';
-import { i18nService } from '../../services/i18n';
-import type { IMConnectivityCheck, IMConnectivityTestResult, IMGatewayConfig, TelegramOpenClawConfig, DiscordOpenClawConfig, WecomOpenClawConfig, PopoOpenClawConfig } from '../../types/im';
-import { MAX_QQ_INSTANCES, MAX_FEISHU_INSTANCES, MAX_DINGTALK_INSTANCES } from '../../types/im';
-import QQInstanceSettings from './QQInstanceSettings';
-import FeishuInstanceSettings from './FeishuInstanceSettings';
-import DingTalkInstanceSettings from './DingTalkInstanceSettings';
-import { PlatformRegistry } from '@shared/platform';
+import { ArrowPathIcon, CheckCircleIcon, ExclamationTriangleIcon, SignalIcon, XCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import type { Platform } from '@shared/platform';
-import { getVisibleIMPlatforms } from '../../utils/regionFilter';
+import { PlatformRegistry } from '@shared/platform';
 import WecomAIBotSDK from '@wecom/wecom-aibot-sdk';
 import { QRCodeSVG } from 'qrcode.react';
-import { ArrowPathIcon } from '@heroicons/react/24/outline';
-import { SchemaForm } from './SchemaForm';
-import type { UiHint } from './SchemaForm';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+
+import { i18nService } from '../../services/i18n';
+import { imService } from '../../services/im';
+import { RootState } from '../../store';
+import {
+  clearError,
+  setDingTalkConfig,
+  setDingTalkInstanceConfig,
+  setDiscordConfig,
+  setFeishuConfig,
+  setFeishuInstanceConfig,
+  setNeteaseBeeChanConfig,
+  setNimConfig,
+  setPopoConfig,
+  setQQConfig,
+  setQQInstanceConfig,
+  setTelegramOpenClawConfig,
+  setWecomConfig,
+  setWeixinConfig,
+} from '../../store/slices/imSlice';
+import type {
+  DiscordOpenClawConfig,
+  IMConnectivityCheck,
+  IMConnectivityTestResult,
+  IMGatewayConfig,
+  PopoOpenClawConfig,
+  TelegramOpenClawConfig,
+  WecomOpenClawConfig,
+} from '../../types/im';
+import { MAX_DINGTALK_INSTANCES, MAX_FEISHU_INSTANCES, MAX_QQ_INSTANCES } from '../../types/im';
+import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import Modal from '../common/Modal';
+import DingTalkInstanceSettings from './DingTalkInstanceSettings';
+import FeishuInstanceSettings from './FeishuInstanceSettings';
+import QQInstanceSettings from './QQInstanceSettings';
+import type { UiHint } from './SchemaForm';
+import { SchemaForm } from './SchemaForm';
 
 
 
@@ -87,6 +110,25 @@ function translateIMError(error: string | null): string {
   }
   return error;
 }
+
+/** Platform ids for IM settings panels that can be hidden as a group (云信 / 小蜜蜂 / POPO / QQ). */
+const ImBotSettingsUiPlatform = {
+  Nim: 'nim',
+  NeteaseBee: 'netease-bee',
+  Popo: 'popo',
+  Qq: 'qq',
+} as const satisfies Record<string, Platform>;
+
+/**
+ * When false, the platform is omitted from the IM bot sidebar and its settings panel is not rendered.
+ * Set to true to restore 云信 (NIM)、小蜜蜂、POPO、QQ configuration UI.
+ */
+const ImBotSettingsUi = {
+  ShowNim: false,
+  ShowNeteaseBee: false,
+  ShowPopo: false,
+  ShowQq: false,
+} as const;
 
 // Helper function to deep-set a value in nested object by dot path
 function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
@@ -730,9 +772,16 @@ const IMSettings: React.FC = () => {
   const weixinConnected = status.weixin?.connected ?? false;
   const popoConnected = status.popo?.connected ?? false;
 
-  // Compute visible platforms based on language
+  // Compute visible platforms based on language (minus UI-hidden IM backends; see ImBotSettingsUi)
   const platforms = useMemo<Platform[]>(() => {
-    return getVisibleIMPlatforms(language) as Platform[];
+    const visible = getVisibleIMPlatforms(language) as Platform[];
+    const hidden: Platform[] = [];
+    if (!ImBotSettingsUi.ShowNim) hidden.push(ImBotSettingsUiPlatform.Nim);
+    if (!ImBotSettingsUi.ShowNeteaseBee) hidden.push(ImBotSettingsUiPlatform.NeteaseBee);
+    if (!ImBotSettingsUi.ShowPopo) hidden.push(ImBotSettingsUiPlatform.Popo);
+    if (!ImBotSettingsUi.ShowQq) hidden.push(ImBotSettingsUiPlatform.Qq);
+    const hiddenSet = new Set(hidden);
+    return visible.filter((p) => !hiddenSet.has(p));
   }, [language]);
 
   // Ensure activePlatform is always in visible platforms when language changes
@@ -1458,8 +1507,8 @@ const IMSettings: React.FC = () => {
           );
         })()}
 
-        {/* QQ Settings (multi-instance) */}
-        {activePlatform === 'qq' && !activeQQInstanceId && (
+        {/* QQ Settings (multi-instance) — gated by ImBotSettingsUi.ShowQq */}
+        {ImBotSettingsUi.ShowQq && activePlatform === 'qq' && !activeQQInstanceId && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <img src={PlatformRegistry.logo('qq')} alt="QQ" className="w-12 h-12 object-contain rounded-md mb-4 opacity-50" />
             <p className="text-sm text-secondary mb-4">
@@ -1482,7 +1531,7 @@ const IMSettings: React.FC = () => {
             )}
           </div>
         )}
-        {activePlatform === 'qq' && activeQQInstanceId && (() => {
+        {ImBotSettingsUi.ShowQq && activePlatform === 'qq' && activeQQInstanceId && (() => {
           const selectedInstance = config.qq.instances.find(i => i.instanceId === activeQQInstanceId);
           if (!selectedInstance) return null;
           const selectedStatus = status.qq?.instances?.find(s => s.instanceId === activeQQInstanceId);
@@ -2179,8 +2228,8 @@ const IMSettings: React.FC = () => {
           </div>
         )}
 
-        {/* NIM (NetEase IM) Settings */}
-        {activePlatform === 'nim' && (
+        {/* NIM (NetEase IM / 云信) Settings — gated by ImBotSettingsUi.ShowNim */}
+        {ImBotSettingsUi.ShowNim && activePlatform === ImBotSettingsUiPlatform.Nim && (
           <div className="space-y-3">
             <PlatformGuide
               title={i18nService.t('nimCredentialsGuide')}
@@ -2262,8 +2311,8 @@ const IMSettings: React.FC = () => {
           </div>
         )}
 
-        {/* 小蜜蜂设置*/}
-        {activePlatform === 'netease-bee' && (
+        {/* 小蜜蜂 (NetEase Bee) — gated by ImBotSettingsUi.ShowNeteaseBee */}
+        {ImBotSettingsUi.ShowNeteaseBee && activePlatform === ImBotSettingsUiPlatform.NeteaseBee && (
           <div className="space-y-3">
             {/* Client ID */}
             <div className="space-y-1.5">
@@ -2715,7 +2764,8 @@ const IMSettings: React.FC = () => {
           </div>
         )}
 
-        {activePlatform === 'popo' && (
+        {/* POPO — gated by ImBotSettingsUi.ShowPopo */}
+        {ImBotSettingsUi.ShowPopo && activePlatform === ImBotSettingsUiPlatform.Popo && (
           <div className="space-y-3">
             {/* Platform Guide */}
             <PlatformGuide

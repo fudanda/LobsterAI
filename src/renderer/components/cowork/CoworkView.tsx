@@ -556,7 +556,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
         <div className="max-w-3xl mx-auto px-4 py-16 space-y-12">
           {/* Welcome Section */}
           <div className="text-center space-y-5">
-            <img src="logo.png" alt="logo" className="w-16 h-16 mx-auto" />
+            <img src="logo.png" alt="logo" className="w-36 h-auto mx-auto" />
             <h2 className="text-3xl font-bold tracking-tight text-foreground">
               {i18nService.t('coworkWelcome')}
             </h2>

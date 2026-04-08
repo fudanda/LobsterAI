@@ -3,6 +3,7 @@ import { agentService } from '../../services/agent';
 import { imService } from '../../services/im';
 import { i18nService } from '../../services/i18n';
 import { XMarkIcon } from '@heroicons/react/24/outline';
+import { agentImUiHiddenPlatformSet } from '../../constants/agentImUiHiddenPlatforms';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import type { IMPlatform, IMGatewayConfig } from '../../types/im';
 import AgentSkillSelector from './AgentSkillSelector';
@@ -223,7 +224,11 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
               </p>
               <div className="space-y-1">
                 {IM_PLATFORMS
-                  .filter(({ key }) => (getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]).includes(key))
+                  .filter(
+                    ({ key }) =>
+                      (getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]).includes(key) &&
+                      !agentImUiHiddenPlatformSet.has(key)
+                  )
                   .map(({ key: platform, logo }) => {
                   const configured = isPlatformConfigured(platform);
                   const bound = boundPlatforms.has(platform);

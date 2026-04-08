@@ -9,8 +9,6 @@ import CoworkSessionList from './cowork/CoworkSessionList';
 import CoworkSearchModal from './cowork/CoworkSearchModal';
 import LoginButton from './LoginButton';
 import ComposeIcon from './icons/ComposeIcon';
-import ConnectorIcon from './icons/ConnectorIcon';
-import SearchIcon from './icons/SearchIcon';
 import ClockIcon from './icons/ClockIcon';
 import PuzzleIcon from './icons/PuzzleIcon';
 import SidebarToggleIcon from './icons/SidebarToggleIcon';
@@ -40,7 +38,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowSkills,
   onShowCowork,
   onShowScheduledTasks,
-  onShowMcp,
+  onShowMcp: _onShowMcp,
   onShowAgents,
   onNewChat,
   isCollapsed,
@@ -172,6 +170,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <ComposeIcon className="h-4 w-4" />
             {i18nService.t('newChat')}
           </button>
+          {/* Search menu (i18n `search` / 搜索任务); restore by uncommenting and re-adding SearchIcon import
           <button
             type="button"
             onClick={() => {
@@ -183,6 +182,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <SearchIcon className="h-4 w-4" />
             {i18nService.t('search')}
           </button>
+          */}
           <button
             type="button"
             onClick={() => {
@@ -213,6 +213,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <PuzzleIcon className="h-4 w-4" />
             {i18nService.t('skills')}
           </button>
+          {/* MCP servers menu; restore by uncommenting and re-adding ConnectorIcon import
           <button
             type="button"
             onClick={() => {
@@ -228,6 +229,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <ConnectorIcon className="h-4 w-4" />
             {i18nService.t('mcpServers')}
           </button>
+          */}
           <button
             type="button"
             onClick={() => {

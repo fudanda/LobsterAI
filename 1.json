@@ -1,0 +1,7 @@
+{
+    "*": true,
+    "re:^X-Trace-.*$": true,
+    "X-Foo": "{client_header:X-Foo}",
+    "Authorization": "Bearer {api_key}",
+    "User-Agent": "claude-cli/2.0.19 (external, cli)"
+}

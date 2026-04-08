@@ -58,6 +58,9 @@ class AuthService {
    */
   async login() {
     const loginUrl = await this.fetchLoginUrl();
+
+    console.log('loginUrl', loginUrl);
+
     await window.electron.auth.login(loginUrl);
   }
 

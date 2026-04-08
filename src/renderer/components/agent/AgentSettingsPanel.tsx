@@ -9,6 +9,7 @@ import TrashIcon from '../icons/TrashIcon';
 import type { Agent } from '../../types/agent';
 import type { Platform } from '@shared/platform';
 import type { IMGatewayConfig } from '../../types/im';
+import { agentImUiHiddenPlatformSet } from '../../constants/agentImUiHiddenPlatforms';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import { PlatformRegistry } from '@shared/platform';
 import AgentSkillSelector from './AgentSkillSelector';
@@ -425,7 +426,11 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
               </p>
               <div className="space-y-1">
                 {PlatformRegistry.platforms
-                  .filter((platform) => (getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]).includes(platform))
+                  .filter(
+                    (platform) =>
+                      (getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]).includes(platform) &&
+                      !agentImUiHiddenPlatformSet.has(platform)
+                  )
                   .map((platform) => {
                     if (MULTI_INSTANCE_PLATFORMS.includes(platform)) {
                       return renderMultiInstancePlatform(platform);
