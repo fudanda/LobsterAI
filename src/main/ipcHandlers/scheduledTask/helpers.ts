@@ -1,5 +1,8 @@
 import { PlatformRegistry } from '../../../shared/platform';
 
+/** IM platforms omitted from scheduled-task “notify channel” lists (小蜜蜂). */
+const ScheduledTaskNotifyUiHiddenPlatforms = new Set<string>(['netease-bee']);
+
 export interface ScheduledTaskHelperDeps {
   getIMGatewayManager: () => {
     getConfig: () => Record<string, unknown> | null;
@@ -32,7 +35,10 @@ export function listScheduledTaskChannels(): Array<{ value: string; label: strin
   const manager = deps?.getIMGatewayManager();
   const config = manager?.getConfig();
   if (!config) {
-    return [...PlatformRegistry.channelOptions()];
+    return PlatformRegistry.channelOptions().filter((option) => {
+      const platform = PlatformRegistry.platformOfChannel(option.value);
+      return !(platform && ScheduledTaskNotifyUiHiddenPlatforms.has(platform));
+    });
   }
 
   const configRecord = config as unknown as Record<string, unknown>;
@@ -65,7 +71,8 @@ export function listScheduledTaskChannels(): Array<{ value: string; label: strin
 
   for (const option of PlatformRegistry.channelOptions()) {
     const platform = PlatformRegistry.platformOfChannel(option.value);
-    if (platform === undefined || !enabledPlatforms.has(platform)) continue;
+    if (platform === undefined || ScheduledTaskNotifyUiHiddenPlatforms.has(platform)) continue;
+    if (!enabledPlatforms.has(platform)) continue;
 
     const instances = instancesByPlatform.get(platform);
     if (instances && instances.length > 0) {

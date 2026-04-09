@@ -158,6 +158,11 @@ const PROVIDER_REGISTRY: Record<string, ProviderDescriptor> = {
     resolveApi: ({ apiType }) => mapApiTypeToOpenClawApi(apiType),
     normalizeBaseUrl: stripChatCompletionsSuffix,
   },
+  [ProviderName.Lzclaw]: {
+    providerId: OpenClawProviderId.Lzclaw,
+    resolveApi: ({ apiType }) => mapApiTypeToOpenClawApi(apiType),
+    normalizeBaseUrl: stripChatCompletionsSuffix,
+  },
   [ProviderName.Qwen]: {
     providerId: OpenClawProviderId.Qwen,
     resolveApi: ({ apiType }) => mapApiTypeToOpenClawApi(apiType),
@@ -273,6 +278,13 @@ describe('resolveDescriptor', () => {
     expect(d.resolveApi({ apiType: 'anthropic', baseURL: '' })).toBe(OpenClawApi.AnthropicMessages);
   });
 
+  test('lzclaw maps to lzclaw providerId respecting apiType', () => {
+    const d = resolveDescriptor(ProviderName.Lzclaw, false);
+    expect(d.providerId).toBe(OpenClawProviderId.Lzclaw);
+    expect(d.resolveApi({ apiType: 'openai', baseURL: '' })).toBe(OpenClawApi.OpenAICompletions);
+    expect(d.resolveApi({ apiType: 'anthropic', baseURL: '' })).toBe(OpenClawApi.AnthropicMessages);
+  });
+
   test('youdaozhiyun always uses openai-completions', () => {
     const d = resolveDescriptor(ProviderName.Youdaozhiyun, false);
     expect(d.providerId).toBe(OpenClawProviderId.Youdaozhiyun);
@@ -318,6 +330,7 @@ describe('provider registry coverage', () => {
     ProviderName.Anthropic,
     ProviderName.OpenAI,
     ProviderName.DeepSeek,
+    ProviderName.Lzclaw,
     ProviderName.Qwen,
     ProviderName.Zhipu,
     ProviderName.Volcengine,
@@ -329,7 +342,7 @@ describe('provider registry coverage', () => {
     ProviderName.Ollama,
   ] as const;
 
-  test('all 14 providers have registry entries', () => {
+  test('all 15 providers have registry entries', () => {
     for (const name of allRegistryProviders) {
       expect(name in PROVIDER_REGISTRY, `${name} missing from registry`).toBe(true);
     }

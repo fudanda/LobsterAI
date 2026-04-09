@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 
+/**
+ * Generate tray assets under resources/tray from a source PNG (default: public/logo.png).
+ *
+ * 1) Prefer ImageMagick (`magick` or `convert`) for full parity (multi-size .ico, macOS template).
+ * 2) If ImageMagick is missing, use sharp + png-to-ico (no system install; run `npm install`).
+ */
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
-const inputPath = path.resolve(projectRoot, process.argv[2] || 'public/logo.png');
+const inputPath = path.resolve(projectRoot, process.argv[2] || 'build/icons/png/512x512.png');
 const outputDir = path.resolve(projectRoot, 'resources/tray');
 
 function run(cmd, args) {
@@ -27,7 +34,7 @@ function hasCommand(cmd, args) {
 function ensureImageMagick() {
   if (hasCommand('magick', ['-version'])) return 'magick';
   if (hasCommand('convert', ['-version'])) return 'convert';
-  throw new Error('ImageMagick is required. Please install `magick` or `convert`.');
+  return null;
 }
 
 function ensureInputExists() {
@@ -40,10 +47,7 @@ function ensureOutputDir() {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-function main() {
-  ensureInputExists();
-  ensureOutputDir();
-  const magick = ensureImageMagick();
+function mainImageMagick(magick) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tray-icons-'));
 
   const win16 = path.join(tmpDir, 'tray-16.png');
@@ -57,7 +61,7 @@ function main() {
   const macColor = path.join(outputDir, 'tray-icon-mac.png');
   const macColor2x = path.join(outputDir, 'tray-icon-mac@2x.png');
   const macColorRaw = path.join(tmpDir, 'tray-icon-mac-raw.png');
-  const macColor2xRaw = path.join(tmpDir, 'tray-icon-mac@2x-raw.png');
+  const macColor2xRaw = path.join(tmpDir, 'tray-icon-mac-2x-raw.png');
 
   run(magick, [inputPath, '-resize', '48x48', linuxPng]);
 
@@ -66,9 +70,6 @@ function main() {
   run(magick, [inputPath, '-resize', '48x48', win48]);
   run(magick, [win16, win32, win48, winIco]);
 
-  // macOS template images: convert the white lobster to opaque pixels while
-  // forcing the red background fully transparent, then center the glyph with
-  // a small padding to avoid menu bar clipping.
   run(magick, [
     inputPath, '-resize', '18x18',
     '-colorspace', 'Gray', '-threshold', '70%',
@@ -89,7 +90,6 @@ function main() {
     macTemplate2x,
   ]);
 
-  // macOS color tray icons: preserve original brand colors.
   run(magick, [
     inputPath,
     '-trim', '+repage',
@@ -131,12 +131,64 @@ function main() {
   ]);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
-  console.log(`Generated tray icons from ${inputPath} -> ${outputDir}`);
+  console.log(`Generated tray icons (ImageMagick) from ${inputPath} -> ${outputDir}`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+async function mainSharpFallback() {
+  let sharp;
+  let pngToIco;
+  try {
+    sharp = require('sharp');
+    pngToIco = require('png-to-ico');
+  } catch {
+    throw new Error(
+      'ImageMagick not found and Node fallback deps missing. Either install ImageMagick (https://imagemagick.org) ' +
+        'so `magick` or `convert` is on PATH, or run `npm install` in the repo (adds sharp + png-to-ico), ' +
+        'then retry. If npm install fails with EBUSY, quit Electron and other apps using this folder first.'
+    );
+  }
+
+  const transparent = { r: 0, g: 0, b: 0, alpha: 0 };
+  const resizeOpts = { fit: 'contain', position: 'center', background: transparent };
+
+  const buf16 = await sharp(inputPath).resize(16, 16, resizeOpts).png().toBuffer();
+  const buf32 = await sharp(inputPath).resize(32, 32, resizeOpts).png().toBuffer();
+  const buf48 = await sharp(inputPath).resize(48, 48, resizeOpts).png().toBuffer();
+
+  fs.writeFileSync(path.join(outputDir, 'tray-icon.png'), buf48);
+
+  const icoBuf = await pngToIco([buf16, buf32, buf48]);
+  fs.writeFileSync(path.join(outputDir, 'tray-icon.ico'), icoBuf);
+
+  const mac = await sharp(inputPath).resize(18, 18, resizeOpts).png().toBuffer();
+  fs.writeFileSync(path.join(outputDir, 'tray-icon-mac.png'), mac);
+  const mac2x = await sharp(inputPath).resize(36, 36, resizeOpts).png().toBuffer();
+  fs.writeFileSync(path.join(outputDir, 'tray-icon-mac@2x.png'), mac2x);
+
+  console.log(`Generated tray icons (sharp fallback) from ${inputPath} -> ${outputDir}`);
+  console.warn(
+    'Note: trayIconTemplate.png / @2x were not generated without ImageMagick; macOS menu bar template styling may differ.'
+  );
 }
+
+async function main() {
+  ensureInputExists();
+  ensureOutputDir();
+
+  const magick = ensureImageMagick();
+  if (magick) {
+    mainImageMagick(magick);
+    return;
+  }
+
+  await mainSharpFallback();
+}
+
+(async () => {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+})();

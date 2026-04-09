@@ -7,8 +7,10 @@ import { i18nService } from '../../services/i18n';
 import { imService } from '../../services/im';
 import type { RootState } from '../../store';
 import type { Model } from '../../store/slices/modelSlice';
-import type { IMGatewayConfig,IMPlatform } from '../../types/im';
+import type { IMGatewayConfig, IMPlatform } from '../../types/im';
+import { agentImUiHiddenPlatformSet } from '../../constants/agentImUiHiddenPlatforms';
 import { toOpenClawModelRef } from '../../utils/openclawModelRef';
+import { PlatformRegistry } from '@shared/platform';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import Modal from '../common/Modal';
 import ModelSelector from '../ModelSelector';
@@ -24,7 +26,7 @@ const IM_PLATFORMS: { key: IMPlatform; logo: string }[] = [
   { key: 'telegram', logo: 'telegram.svg' },
   { key: 'discord', logo: 'discord.svg' },
   { key: 'nim', logo: 'nim.png' },
-  { key: 'xiaomifeng', logo: 'xiaomifeng.png' },
+  { key: 'netease-bee', logo: PlatformRegistry.logo('netease-bee') },
   { key: 'weixin', logo: 'weixin.png' },
   { key: 'wecom', logo: 'wecom.png' },
   { key: 'popo', logo: 'popo.png' },
@@ -45,7 +47,6 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<CreateTab>('basic');
-  const availableModels = useSelector((state: RootState) => state.model.availableModels);
   const globalSelectedModel = useSelector((state: RootState) => state.model.selectedModel);
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
 
@@ -265,11 +266,11 @@ const AgentCreateModal: React.FC<AgentCreateModalProps> = ({ isOpen, onClose }) 
                   value={model}
                   onChange={setModel}
                 />
-                {availableModels.length > 0 && (
+                {/* {availableModels.length > 0 && (
                   <p className="mt-1 text-xs text-secondary/70">
                     {i18nService.t('agentModelOpenClawOnly') || 'This setting only applies to the OpenClaw engine'}
                   </p>
-                )}
+                )} */}
               </div>
             </div>
           )}

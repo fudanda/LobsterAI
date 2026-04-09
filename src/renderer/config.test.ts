@@ -25,6 +25,10 @@ test('isCustomProvider: deepseek is not custom', () => {
   expect(isCustomProvider('deepseek')).toBe(false);
 });
 
+test('isCustomProvider: lzclaw is not custom', () => {
+  expect(isCustomProvider('lzclaw')).toBe(false);
+});
+
 test('isCustomProvider: empty string is not custom', () => {
   expect(isCustomProvider('')).toBe(false);
 });

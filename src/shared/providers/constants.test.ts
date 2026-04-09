@@ -9,15 +9,16 @@ describe('ProviderName constants', () => {
   test('contains expected provider keys', () => {
     expect(ProviderName.OpenAI).toBe('openai');
     expect(ProviderName.DeepSeek).toBe('deepseek');
+    expect(ProviderName.Lzclaw).toBe('lzclaw');
     expect(ProviderName.Custom).toBe('custom');
     expect(ProviderName.LobsteraiServer).toBe('lobsterai-server');
   });
 });
 
 describe('ProviderRegistry', () => {
-  test('providerIds returns 15 providers (no custom)', () => {
+  test('providerIds returns 16 providers (no custom)', () => {
     const ids = ProviderRegistry.providerIds;
-    expect(ids.length).toBe(15);
+    expect(ids.length).toBe(16);
     expect(ids).not.toContain(ProviderName.Custom);
     expect(ids).not.toContain(ProviderName.LobsteraiServer);
   });
@@ -45,13 +46,15 @@ describe('ProviderRegistry', () => {
   test('supportsCodingPlan is false for others', () => {
     expect(ProviderRegistry.supportsCodingPlan(ProviderName.OpenAI)).toBe(false);
     expect(ProviderRegistry.supportsCodingPlan(ProviderName.DeepSeek)).toBe(false);
+    expect(ProviderRegistry.supportsCodingPlan(ProviderName.Lzclaw)).toBe(false);
     expect(ProviderRegistry.supportsCodingPlan('unknown')).toBe(false);
   });
 
-  test('idsByRegion china returns 10 providers', () => {
+  test('idsByRegion china returns 11 providers', () => {
     const china = ProviderRegistry.idsByRegion('china');
-    expect(china.length).toBe(10);
+    expect(china.length).toBe(11);
     expect(china).toContain(ProviderName.DeepSeek);
+    expect(china).toContain(ProviderName.Lzclaw);
     expect(china).toContain(ProviderName.Ollama);
     expect(china).not.toContain(ProviderName.OpenAI);
   });
@@ -82,6 +85,12 @@ describe('ProviderRegistry', () => {
   test('idsForEnLocale has no duplicates', () => {
     const en = ProviderRegistry.idsForEnLocale();
     expect(new Set(en).size).toBe(en.length);
+  });
+
+  test('lzclaw default base URL matches OpenAI compat path', () => {
+    const def = ProviderRegistry.get(ProviderName.Lzclaw);
+    expect(def?.defaultApiFormat).toBe(ApiFormat.OpenAI);
+    expect(def?.defaultBaseUrl).toBe('http://localhost:3000/v1');
   });
 
   test('every definition has non-empty defaultBaseUrl', () => {
@@ -128,11 +137,13 @@ describe('ProviderRegistry', () => {
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'anthropic')).toBe('https://open.bigmodel.cn/api/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'anthropic')).toBe('https://api.minimaxi.com/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Qwen, 'anthropic')).toBe('https://dashscope.aliyuncs.com/apps/anthropic');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'anthropic')).toBe('http://localhost:3000');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Ollama, 'anthropic')).toBe('http://localhost:11434');
     });
 
     test('returns openai url for providers with switchableBaseUrls', () => {
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'openai')).toBe('https://api.deepseek.com');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'openai')).toBe('http://localhost:3000/v1');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Moonshot, 'openai')).toBe('https://api.moonshot.cn/v1');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'openai')).toBe('https://open.bigmodel.cn/api/paas/v4');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'openai')).toBe('https://api.minimaxi.com/v1');

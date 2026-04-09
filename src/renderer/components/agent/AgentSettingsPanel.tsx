@@ -4,6 +4,7 @@ import { PlatformRegistry } from '@shared/platform';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 
+import { agentImUiHiddenPlatformSet } from '../../constants/agentImUiHiddenPlatforms';
 import { agentService } from '../../services/agent';
 import { i18nService } from '../../services/i18n';
 import { imService } from '../../services/im';

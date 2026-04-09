@@ -122,6 +122,7 @@ const ImBotSettingsUiPlatform = {
 /**
  * When false, the platform is omitted from the IM bot sidebar and its settings panel is not rendered.
  * Set to true to restore 云信 (NIM)、小蜜蜂、POPO、QQ configuration UI.
+ * 小蜜蜂详情表单另在下方以 `false &&` 整段注释，避免误开 ShowNeteaseBee 时渲染。
  */
 const ImBotSettingsUi = {
   ShowNim: false,
@@ -2311,8 +2312,8 @@ const IMSettings: React.FC = () => {
           </div>
         )}
 
-        {/* 小蜜蜂 (NetEase Bee) — gated by ImBotSettingsUi.ShowNeteaseBee */}
-        {ImBotSettingsUi.ShowNeteaseBee && activePlatform === ImBotSettingsUiPlatform.NeteaseBee && (
+        {/* 小蜜蜂 (NetEase Bee)：整段 UI 已注释下线；恢复时去掉外层 `false &&` 并视需要将 ShowNeteaseBee 设为 true */}
+        {false && ImBotSettingsUi.ShowNeteaseBee && activePlatform === ImBotSettingsUiPlatform.NeteaseBee && (
           <div className="space-y-3">
             {/* Client ID */}
             <div className="space-y-1.5">

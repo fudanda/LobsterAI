@@ -27,6 +27,7 @@ export const ProviderName = {
   Gemini: 'gemini',
   Anthropic: 'anthropic',
   DeepSeek: 'deepseek',
+  Lzclaw: 'lzclaw',
   Moonshot: 'moonshot',
   Zhipu: 'zhipu',
   Minimax: 'minimax',
@@ -52,6 +53,7 @@ export const OpenClawProviderId = {
   Anthropic: 'anthropic',
   OpenAI: 'openai',
   DeepSeek: 'deepseek',
+  Lzclaw: 'lzclaw',
   Qwen: 'qwen-portal', // OpenClaw normalizes 'qwen' → 'qwen-portal'; use canonical ID to avoid config diff loop
   Zai: 'zai', // OpenClaw official provider ID for Zhipu/GLM
   Volcengine: 'volcengine',
@@ -178,6 +180,21 @@ const PROVIDER_DEFINITIONS = [
     region: 'china',
     enPriority: 0,
     defaultModels: [{ id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', supportsImage: false }],
+  },
+  {
+    id: ProviderName.Lzclaw,
+    openClawProviderId: OpenClawProviderId.Lzclaw,
+    // Must match defaultApiFormat (OpenAI): compat base is /v1, not the site root.
+    defaultBaseUrl: 'http://localhost:3000/v1',
+    defaultApiFormat: ApiFormat.OpenAI,
+    codingPlanSupported: false,
+    switchableBaseUrls: {
+      anthropic: 'http://localhost:3000',
+      openai: 'http://localhost:3000/v1',
+    },
+    region: 'china',
+    enPriority: 0,
+    defaultModels: [{ id: 'kimi-for-coding', name: 'kimi', supportsImage: false }],
   },
   {
     id: ProviderName.Moonshot,

@@ -46,6 +46,7 @@ import { getCoworkLogPath } from './libs/coworkLogger';
 import { registerProxyTokenRefresher, startCoworkOpenAICompatProxy, stopCoworkOpenAICompatProxy } from './libs/coworkOpenAICompatProxy';
 import { CoworkRunner } from './libs/coworkRunner';
 import { generateSessionTitle, probeCoworkModelReadiness } from './libs/coworkUtil';
+import { LoginPageBaseUrl } from '@shared/auth/constants';
 import { getServerApiBaseUrl, refreshEndpointsTestMode } from './libs/endpoints';
 import { mergeEnterpriseOpenclawConfig, resolveEnterpriseConfigPath, syncEnterpriseConfig } from './libs/enterpriseConfigSync';
 import { exportLogsZip } from './libs/logExport';
@@ -1630,12 +1631,22 @@ const PRELOAD_PATH = app.isPackaged
   ? path.join(__dirname, 'preload.js')
   : path.join(__dirname, '../dist-electron/preload.js');
 
-// 获取应用图标路径（Windows 使用 .ico，其他平台使用 .png）
+// 获取 BrowserWindow 图标：打包后沿用 resources/tray；开发时若已生成 build/icons 则优先用其（与 electron-builder 的 exe/icns 同源），避免只改 build/icons 却看不到窗口图标变化。
 const getAppIconPath = (): string | undefined => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
+  const repoRoot = path.join(__dirname, '..');
+  if (!app.isPackaged) {
+    if (process.platform === 'win32') {
+      const devIco = path.join(repoRoot, 'build', 'icons', 'win', 'icon.ico');
+      if (fs.existsSync(devIco)) return devIco;
+    } else {
+      const devPng = path.join(repoRoot, 'build', 'icons', 'png', '512x512.png');
+      if (fs.existsSync(devPng)) return devPng;
+    }
+  }
   const basePath = app.isPackaged
     ? path.join(process.resourcesPath, 'tray')
-    : path.join(__dirname, '..', 'resources', 'tray');
+    : path.join(repoRoot, 'resources', 'tray');
   return process.platform === 'win32'
     ? path.join(basePath, 'tray-icon.ico')
     : path.join(basePath, 'tray-icon.png');
@@ -2107,7 +2118,7 @@ if (!gotTheLock) {
 
   ipcMain.handle('auth:login', async (_event, { loginUrl }: { loginUrl?: string } = {}) => {
     try {
-      const baseUrl = loginUrl || `${getServerApiBaseUrl()}/login`;
+      const baseUrl = (loginUrl && loginUrl.trim()) || LoginPageBaseUrl;
       const finalUrl = `${baseUrl}?source=electron`;
       await shell.openExternal(finalUrl);
       return { success: true };

@@ -3,6 +3,7 @@
  * 后续新增的业务接口也应在此文件中配置。
  */
 
+import { LoginPageBaseUrl } from '@shared/auth/constants';
 import { configService } from './config';
 
 const isTestMode = () => {
@@ -28,10 +29,8 @@ export const getSkillStoreUrl = () => isTestMode()
   ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/skill-store'
   : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/skill-store';
 
-// 登录地址
-export const getLoginOvermindUrl = () => isTestMode()
-  ? 'http://localhost:3000/login'
-  : 'http://localhost:3000/login';
+// 登录页（浏览器打开；主进程在 loginUrl 为空时回退到同一常量）
+export const getLoginPageUrl = () => LoginPageBaseUrl;
 
 // Portal 页面
 const PORTAL_BASE_TEST = 'https://c.youdao.com/dict/hardware/cowork/lobsterai-portal.html#';

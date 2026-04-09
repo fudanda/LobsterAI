@@ -21,6 +21,11 @@ export default defineConfig({
         // 主进程入口文件
         entry: 'src/main/main.ts',
         vite: {
+          resolve: {
+            alias: {
+              '@shared': path.resolve(__dirname, './src/shared'),
+            },
+          },
           build: {
             sourcemap: true,
             outDir: 'dist-electron',
@@ -48,6 +53,11 @@ export default defineConfig({
         // 预加载脚本入口文件
         entry: 'src/main/preload.ts',
         vite: {
+          resolve: {
+            alias: {
+              '@shared': path.resolve(__dirname, './src/shared'),
+            },
+          },
           build: {
             sourcemap: true,
             outDir: 'dist-electron',

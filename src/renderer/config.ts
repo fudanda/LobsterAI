@@ -42,6 +42,17 @@ export interface AppConfig {
         supportsImage?: boolean;
       }>;
     };
+    lzclaw: {
+      enabled: boolean;
+      apiKey: string;
+      baseUrl: string;
+      apiFormat?: 'anthropic' | 'openai' | 'gemini';
+      models?: Array<{
+        id: string;
+        name: string;
+        supportsImage?: boolean;
+      }>;
+    };
     moonshot: {
       enabled: boolean;
       apiKey: string;
