@@ -20,6 +20,7 @@ import {
 } from '../store/slices/coworkSlice';
 import type {
   CoworkSession,
+  CoworkConfig,
   CoworkConfigUpdate,
   CoworkApiConfig,
   CoworkUserMemoryEntry,
@@ -215,7 +216,11 @@ class CoworkService {
   async loadConfig(): Promise<void> {
     const result = await window.electron?.cowork?.getConfig();
     if (result?.success && result.config) {
-      store.dispatch(setConfig(result.config));
+      const merged: CoworkConfig = {
+        ...result.config,
+        skipMissedJobs: result.config.skipMissedJobs ?? false,
+      };
+      store.dispatch(setConfig(merged));
     }
   }
 
