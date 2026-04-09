@@ -9,6 +9,7 @@ import { i18nService, LanguageType } from '../services/i18n';
 import { decryptSecret, encryptWithPassword, decryptWithPassword, EncryptedPayload, PasswordEncryptedPayload } from '../services/encryption';
 import { coworkService } from '../services/cowork';
 import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '../constants/app';
+import { ModelProvidersUi, ModelSettingsSoloProvider } from '../constants/modelProvidersUi';
 import ErrorMessage from './ErrorMessage';
 import { XMarkIcon, Cog6ToothIcon, SignalIcon, CheckCircleIcon, XCircleIcon, CubeIcon, ChatBubbleLeftIcon, EnvelopeIcon, CpuChipIcon, InformationCircleIcon, UserCircleIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
@@ -34,6 +35,7 @@ import { defaultConfig, type AppConfig, getVisibleProviders, isCustomProvider, g
 import {
   OpenAIIcon,
   DeepSeekIcon,
+  LzclawIcon,
   GeminiIcon,
   AnthropicIcon,
   MoonshotIcon,
@@ -150,7 +152,7 @@ interface ProvidersImportPayload {
 const providerMeta: Record<ProviderType, { label: string; icon: React.ReactNode }> = {
   openai: { label: 'OpenAI', icon: <OpenAIIcon /> },
   deepseek: { label: 'DeepSeek', icon: <DeepSeekIcon /> },
-  lzclaw: { label: 'LZClaw', icon: <DeepSeekIcon /> },
+  lzclaw: { label: 'LZClaw', icon: <LzclawIcon /> },
   gemini: { label: 'Gemini', icon: <GeminiIcon /> },
   anthropic: { label: 'Anthropic', icon: <AnthropicIcon /> },
   moonshot: { label: 'Moonshot', icon: <MoonshotIcon /> },
@@ -277,6 +279,10 @@ const getFixedApiFormatForProvider = (provider: string): 'anthropic' | 'openai' 
   // spec (tool use, streaming, etc.), so the Claude Agent SDK cannot use it.
   // Force OpenAI format — requests go through the built-in compat proxy instead.
   if (provider === 'moonshot') {
+    return 'openai';
+  }
+  // LZClaw: OpenAI-compatible endpoint only; hide API format toggle (no Anthropic option in UI).
+  if (provider === 'lzclaw') {
     return 'openai';
   }
   if (provider === 'anthropic') {
@@ -413,6 +419,9 @@ const getDefaultProviders = (): ProvidersConfig => {
 };
 
 const getDefaultActiveProvider = (): ProviderType => {
+  if (ModelProvidersUi.OnlyLzclaw) {
+    return ModelSettingsSoloProvider;
+  }
   const providers = (defaultConfig.providers ?? {}) as ProvidersConfig;
   const firstEnabledProvider = providerKeys.find(providerKey => providers[providerKey]?.enabled);
   return firstEnabledProvider ?? providerKeys[0];
@@ -1093,17 +1102,21 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
 
   // Compute visible providers based on language, including active custom_N entries
   const visibleProviders = useMemo(() => {
-    const visibleKeys = getVisibleProviders(language);
+    const visibleKeys = ModelProvidersUi.OnlyLzclaw
+      ? [ModelSettingsSoloProvider]
+      : getVisibleProviders(language);
     const filtered: Partial<ProvidersConfig> = {};
     for (const key of visibleKeys) {
       if (providers[key as keyof ProvidersConfig]) {
         filtered[key as keyof ProvidersConfig] = providers[key as keyof ProvidersConfig];
       }
     }
-    // Append custom_N providers that exist in state, sorted by numeric suffix
-    for (const key of CUSTOM_PROVIDER_KEYS) {
-      if (providers[key]) {
-        filtered[key] = providers[key];
+    if (!ModelProvidersUi.OnlyLzclaw) {
+      // Append custom_N providers that exist in state, sorted by numeric suffix
+      for (const key of CUSTOM_PROVIDER_KEYS) {
+        if (providers[key]) {
+          filtered[key] = providers[key];
+        }
       }
     }
     return filtered as ProvidersConfig;
@@ -2947,32 +2960,36 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 <h3 className="text-sm font-medium text-foreground">
                   {i18nService.t('modelProviders')}
                 </h3>
-                <div className="flex items-center space-x-1">
-                  <button
-                    type="button"
-                    onClick={handleImportProvidersClick}
-                    disabled={isImportingProviders || isExportingProviders}
-                    className="inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
-                  >
-                    {i18nService.t('import')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleExportProviders}
-                    disabled={isImportingProviders || isExportingProviders}
-                    className="inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
-                  >
-                    {i18nService.t('export')}
-                  </button>
-                </div>
+                {ModelProvidersUi.ShowImportExport && (
+                  <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={handleImportProvidersClick}
+                      disabled={isImportingProviders || isExportingProviders}
+                      className="inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
+                    >
+                      {i18nService.t('import')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportProviders}
+                      disabled={isImportingProviders || isExportingProviders}
+                      className="inline-flex items-center px-2 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised disabled:opacity-50 disabled:cursor-not-allowed transition-colors active:scale-[0.98]"
+                    >
+                      {i18nService.t('export')}
+                    </button>
+                  </div>
+                )}
               </div>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={handleImportProviders}
-              />
+              {ModelProvidersUi.ShowImportExport && (
+                <input
+                  ref={importInputRef}
+                  type="file"
+                  accept="application/json"
+                  className="hidden"
+                  onChange={handleImportProviders}
+                />
+              )}
               {Object.entries(visibleProviders).map(([provider, config]) => {
                 const providerKey = provider as ProviderType;
                 const isCustom = isCustomProvider(provider);
@@ -3055,7 +3072,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, notice
                 );
               })}
               {/* Add Custom Provider Button */}
-              {CUSTOM_PROVIDER_KEYS.some(k => !providers[k]) && (
+              {ModelProvidersUi.ShowAddCustomProvider && CUSTOM_PROVIDER_KEYS.some(k => !providers[k]) && (
               <button
                 type="button"
                 onClick={handleAddCustomProvider}

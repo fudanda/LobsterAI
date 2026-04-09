@@ -1,5 +1,6 @@
 export { default as OpenAIIcon } from './OpenAIIcon';
 export { default as DeepSeekIcon } from './DeepSeekIcon';
+export { default as LzclawIcon } from './LzclawIcon';
 export { default as GeminiIcon } from './GeminiIcon';
 export { default as AnthropicIcon } from './AnthropicIcon';
 export { default as MoonshotIcon } from './MoonshotIcon';
