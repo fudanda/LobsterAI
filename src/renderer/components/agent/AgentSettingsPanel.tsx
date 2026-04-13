@@ -11,7 +11,16 @@ import { imService } from '../../services/im';
 import { RootState } from '../../store';
 import type { Model } from '../../store/slices/modelSlice';
 import type { Agent } from '../../types/agent';
-import type { DingTalkInstanceConfig, DingTalkInstanceStatus, FeishuInstanceConfig, FeishuInstanceStatus, IMGatewayConfig, IMGatewayStatus, QQInstanceConfig, QQInstanceStatus } from '../../types/im';
+import type {
+  DingTalkInstanceConfig,
+  DingTalkInstanceStatus,
+  FeishuInstanceConfig,
+  FeishuInstanceStatus,
+  IMGatewayConfig,
+  IMGatewayStatus,
+  QQInstanceConfig,
+  QQInstanceStatus,
+} from '../../types/im';
 import { resolveOpenClawModelRef, toOpenClawModelRef } from '../../utils/openclawModelRef';
 import { getVisibleIMPlatforms } from '../../utils/regionFilter';
 import Modal from '../common/Modal';
@@ -36,7 +45,11 @@ interface AgentSettingsPanelProps {
   onSwitchAgent?: (agentId: string) => void;
 }
 
-const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClose, onSwitchAgent }) => {
+const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({
+  agentId,
+  onClose,
+  onSwitchAgent,
+}) => {
   const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
   const agents = useSelector((state: RootState) => state.agent.agents);
   const imStatus = useSelector((state: RootState) => state.im.status);
@@ -74,7 +87,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
     setActiveTab('basic');
     setShowDeleteConfirm(false);
     setShowUnsavedConfirm(false);
-    window.electron?.agents?.get(agentId).then((a) => {
+    window.electron?.agents?.get(agentId).then(a => {
       if (a) {
         setAgent(a);
         setName(a.name);
@@ -95,7 +108,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
       }
     });
     // Load IM config and status for bindings
-    imService.loadConfig().then((cfg) => {
+    imService.loadConfig().then(cfg => {
       if (cfg) {
         setImConfig(cfg);
         const bindings = cfg.settings?.platformAgentBindings || {};
@@ -119,8 +132,16 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
     if (systemPrompt !== init.systemPrompt) return true;
     if (identity !== init.identity) return true;
     if (icon !== init.icon) return true;
-    if (skillIds.length !== init.skillIds.length || skillIds.some((id, i) => id !== init.skillIds[i])) return true;
-    if (boundKeys.size !== initialBoundKeys.size || [...boundKeys].some((k) => !initialBoundKeys.has(k))) return true;
+    if (
+      skillIds.length !== init.skillIds.length ||
+      skillIds.some((id, i) => id !== init.skillIds[i])
+    )
+      return true;
+    if (
+      boundKeys.size !== initialBoundKeys.size ||
+      [...boundKeys].some(k => !initialBoundKeys.has(k))
+    )
+      return true;
     return false;
   }, [name, description, systemPrompt, identity, icon, skillIds, boundKeys, initialBoundKeys]);
 
@@ -153,13 +174,15 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         skillIds,
       });
       if (!result) {
-        window.dispatchEvent(new CustomEvent('app:showToast', { detail: i18nService.t('agentSaveFailed') }));
+        window.dispatchEvent(
+          new CustomEvent('app:showToast', { detail: i18nService.t('agentSaveFailed') }),
+        );
         return;
       }
       // Persist IM bindings if changed
       const bindingsChanged =
         boundKeys.size !== initialBoundKeys.size ||
-        [...boundKeys].some((k) => !initialBoundKeys.has(k));
+        [...boundKeys].some(k => !initialBoundKeys.has(k));
       if (bindingsChanged && imConfig) {
         const currentBindings = { ...(imConfig.settings?.platformAgentBindings || {}) };
         // Remove old bindings for this agent
@@ -179,7 +202,9 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
       }
       onClose();
     } catch {
-      window.dispatchEvent(new CustomEvent('app:showToast', { detail: i18nService.t('agentSaveFailed') }));
+      window.dispatchEvent(
+        new CustomEvent('app:showToast', { detail: i18nService.t('agentSaveFailed') }),
+      );
     } finally {
       setSaving(false);
     }
@@ -230,7 +255,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
   /** Resolve agent name by id */
   const getAgentName = (aid: string): string | null => {
     if (!aid || aid === 'main') return null;
-    const agent = agents.find((a) => a.id === aid);
+    const agent = agents.find(a => a.id === aid);
     return agent?.name || aid;
   };
 
@@ -270,14 +295,17 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         >
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center">
-              <img src={logo} alt={i18nService.t(platform)} className="w-6 h-6 object-contain rounded" />
+              <img
+                src={logo}
+                alt={i18nService.t(platform)}
+                className="w-6 h-6 object-contain rounded"
+              />
             </div>
             <div>
-              <div className="text-sm font-medium text-foreground">
-                {i18nService.t(platform)}
-              </div>
+              <div className="text-sm font-medium text-foreground">{i18nService.t(platform)}</div>
               <div className="text-xs text-secondary/50">
-                {i18nService.t('agentIMNotConfiguredHint') || 'Please configure in Settings > IM Bots first'}
+                {i18nService.t('agentIMNotConfiguredHint') ||
+                  'Please configure in Settings > IM Bots first'}
               </div>
             </div>
           </div>
@@ -293,11 +321,13 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         {/* Platform header */}
         <div className="flex items-center gap-3 px-3 py-2.5 bg-surface-raised">
           <div className="flex h-8 w-8 items-center justify-center">
-            <img src={logo} alt={i18nService.t(platform)} className="w-6 h-6 object-contain rounded" />
+            <img
+              src={logo}
+              alt={i18nService.t(platform)}
+              className="w-6 h-6 object-contain rounded"
+            />
           </div>
-          <span className="text-sm font-semibold text-foreground">
-            {i18nService.t(platform)}
-          </span>
+          <span className="text-sm font-semibold text-foreground">{i18nService.t(platform)}</span>
         </div>
         {/* Instance list */}
         {connectedInstances.map((inst: MultiInstanceConfig, idx: number) => {
@@ -317,20 +347,17 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
             >
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                <span className="text-sm text-foreground">
-                  {inst.instanceName}
-                </span>
+                <span className="text-sm text-foreground">{inst.instanceName}</span>
                 {boundToOther && otherAgentName && (
                   <span className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                    {(i18nService.t('agentIMBoundToOther') || '→ {agent}').replace('{agent}', otherAgentName)}
+                    {(i18nService.t('agentIMBoundToOther') || '→ {agent}').replace(
+                      '{agent}',
+                      otherAgentName,
+                    )}
                   </span>
                 )}
               </div>
-              {boundToOther ? (
-                <div className="w-9 h-5" />
-              ) : (
-                renderToggle(isBound)
-              )}
+              {boundToOther ? <div className="w-9 h-5" /> : renderToggle(isBound)}
             </div>
           );
         })}
@@ -353,33 +380,45 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
         className={`flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors ${
           configured && !boundToOther
             ? 'hover:bg-surface-raised cursor-pointer'
-            : boundToOther ? 'opacity-55' : 'opacity-50'
+            : boundToOther
+              ? 'opacity-55'
+              : 'opacity-50'
         }`}
         onClick={() => configured && !boundToOther && handleToggleIMBinding(platform)}
       >
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center">
-            <img src={logo} alt={i18nService.t(platform)} className="w-6 h-6 object-contain rounded" />
+            <img
+              src={logo}
+              alt={i18nService.t(platform)}
+              className="w-6 h-6 object-contain rounded"
+            />
           </div>
           <div>
-            <div className="text-sm font-medium text-foreground">
-              {i18nService.t(platform)}
-            </div>
+            <div className="text-sm font-medium text-foreground">{i18nService.t(platform)}</div>
             {!configured && (
               <div className="text-xs text-secondary/50">
-                {i18nService.t('agentIMNotConfiguredHint') || 'Please configure in Settings > IM Bots first'}
+                {i18nService.t('agentIMNotConfiguredHint') ||
+                  'Please configure in Settings > IM Bots first'}
               </div>
             )}
           </div>
           {boundToOther && otherAgentName && (
             <span className="text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
-              {(i18nService.t('agentIMBoundToOther') || '→ {agent}').replace('{agent}', otherAgentName)}
+              {(i18nService.t('agentIMBoundToOther') || '→ {agent}').replace(
+                '{agent}',
+                otherAgentName,
+              )}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {configured ? (
-            boundToOther ? <div className="w-9 h-5" /> : renderToggle(isBound)
+            boundToOther ? (
+              <div className="w-9 h-5" />
+            ) : (
+              renderToggle(isBound)
+            )
           ) : (
             <span className="text-xs text-secondary/50">
               {i18nService.t('agentIMNotConfigured') || 'Not configured'}
@@ -392,31 +431,36 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
 
   return (
     <>
-    <Modal onClose={handleClose} className="w-full max-w-2xl mx-4 rounded-xl shadow-xl bg-surface border border-border max-h-[80vh] flex flex-col">
+      <Modal
+        onClose={handleClose}
+        className="w-full max-w-2xl mx-4 rounded-xl shadow-xl bg-surface border border-border max-h-[80vh] flex flex-col"
+      >
         {/* Header: agent icon + name + close */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-2">
             <span className="text-xl">{icon || '🤖'}</span>
             <h3 className="text-base font-semibold text-foreground">
-              {name || (i18nService.t('agentSettings') || 'Agent Settings')}
+              {name || i18nService.t('agentSettings') || 'Agent Settings'}
             </h3>
           </div>
-          <button type="button" onClick={handleClose} className="p-1 rounded-lg hover:bg-surface-raised">
+          <button
+            type="button"
+            onClick={handleClose}
+            className="p-1 rounded-lg hover:bg-surface-raised"
+          >
             <XMarkIcon className="h-5 w-5 text-secondary" />
           </button>
         </div>
 
         {/* Tab bar */}
         <div className="flex border-b border-border px-5">
-          {tabs.map((tab) => (
+          {tabs.map(tab => (
             <button
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
               className={`px-4 py-2.5 text-sm font-medium transition-colors relative ${
-                activeTab === tab.key
-                  ? 'text-primary'
-                  : 'text-secondary hover:text-foreground'
+                activeTab === tab.key ? 'text-primary' : 'text-secondary hover:text-foreground'
               }`}
             >
               {tab.label}
@@ -440,7 +484,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                   <input
                     type="text"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={e => setName(e.target.value)}
                     className="flex-1 px-3 py-2 rounded-lg border border-border bg-transparent text-foreground text-sm"
                   />
                 </div>
@@ -452,7 +496,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                 <input
                   type="text"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={e => setDescription(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-border bg-transparent text-foreground text-sm"
                 />
               </div>
@@ -462,7 +506,7 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                 </label>
                 <textarea
                   value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  onChange={e => setSystemPrompt(e.target.value)}
                   rows={4}
                   className="w-full px-3 py-2 rounded-lg border border-border bg-transparent text-foreground text-sm resize-none"
                 />
@@ -473,9 +517,12 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                 </label>
                 <textarea
                   value={identity}
-                  onChange={(e) => setIdentity(e.target.value)}
+                  onChange={e => setIdentity(e.target.value)}
                   rows={3}
-                  placeholder={i18nService.t('agentIdentityPlaceholder') || 'Identity description (IDENTITY.md)...'}
+                  placeholder={
+                    i18nService.t('agentIdentityPlaceholder') ||
+                    'Identity description (IDENTITY.md)...'
+                  }
                   className="w-full px-3 py-2 rounded-lg border border-border bg-transparent text-foreground text-sm resize-none"
                 />
               </div>
@@ -483,15 +530,12 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
                 <label className="block text-sm font-medium text-secondary mb-1">
                   {i18nService.t('agentDefaultModel') || 'Agent Default Model'}
                 </label>
-                <ModelSelector
-                  value={model}
-                  onChange={setModel}
-                />
-                {availableModels.length > 0 && (
+                <ModelSelector value={model} onChange={setModel} />
+                {/* {availableModels.length > 0 && (
                   <p className="mt-1 text-xs text-secondary/70">
                     {i18nService.t('agentModelOpenClawOnly') || 'This setting only applies to the OpenClaw engine'}
                   </p>
-                )}
+                )} */}
               </div>
             </div>
           )}
@@ -508,11 +552,12 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
               <div className="space-y-1">
                 {PlatformRegistry.platforms
                   .filter(
-                    (platform) =>
-                      (getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]).includes(platform) &&
-                      !agentImUiHiddenPlatformSet.has(platform)
+                    platform =>
+                      (
+                        getVisibleIMPlatforms(i18nService.getLanguage()) as readonly string[]
+                      ).includes(platform) && !agentImUiHiddenPlatformSet.has(platform),
                   )
-                  .map((platform) => {
+                  .map(platform => {
                     if (isMultiInstancePlatform(platform)) {
                       return renderMultiInstancePlatform(platform);
                     }
@@ -560,95 +605,99 @@ const AgentSettingsPanel: React.FC<AgentSettingsPanelProps> = ({ agentId, onClos
               disabled={!name.trim() || saving}
               className="px-4 py-2 text-sm font-medium rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {saving ? (i18nService.t('saving') || 'Saving...') : (i18nService.t('save') || 'Save')}
+              {saving ? i18nService.t('saving') || 'Saving...' : i18nService.t('save') || 'Save'}
             </button>
           </div>
         </div>
-    </Modal>
+      </Modal>
 
-    {/* Delete Confirmation Modal */}
-    {showDeleteConfirm && (
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center"
-        onClick={() => setShowDeleteConfirm(false)}
-      >
-        <div className="absolute inset-0 bg-black/40 dark:bg-black/60" />
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
         <div
-          className="relative w-80 rounded-xl shadow-2xl bg-surface border border-border p-5"
-          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          onClick={() => setShowDeleteConfirm(false)}
         >
-          <div className="flex flex-col items-center text-center">
-            <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
-              <ExclamationTriangleIcon className="w-5 h-5 text-red-500" />
-            </div>
-            <h3 className="text-sm font-semibold text-foreground mb-2">
-              {i18nService.t('agentDeleteConfirmTitle') || 'Confirm Delete Agent'}
-            </h3>
-            <p className="text-sm text-secondary mb-5">
-              {(i18nService.t('agentDeleteConfirmMessage') || 'Are you sure you want to delete Agent "{name}"? This action cannot be undone.').replace('{name}', name)}
-            </p>
-            <div className="flex items-center gap-3 w-full">
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(false)}
-                className="flex-1 px-4 py-2 text-sm rounded-lg text-foreground border border-border hover:bg-surface-raised transition-colors"
-              >
-                {i18nService.t('cancel') || 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="flex-1 px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
-              >
-                {i18nService.t('delete') || 'Delete'}
-              </button>
+          <div className="absolute inset-0 bg-black/40 dark:bg-black/60" />
+          <div
+            className="relative w-80 rounded-xl shadow-2xl bg-surface border border-border p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-3">
+                <ExclamationTriangleIcon className="w-5 h-5 text-red-500" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                {i18nService.t('agentDeleteConfirmTitle') || 'Confirm Delete Agent'}
+              </h3>
+              <p className="text-sm text-secondary mb-5">
+                {(
+                  i18nService.t('agentDeleteConfirmMessage') ||
+                  'Are you sure you want to delete Agent "{name}"? This action cannot be undone.'
+                ).replace('{name}', name)}
+              </p>
+              <div className="flex items-center gap-3 w-full">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 px-4 py-2 text-sm rounded-lg text-foreground border border-border hover:bg-surface-raised transition-colors"
+                >
+                  {i18nService.t('cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="flex-1 px-4 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+                >
+                  {i18nService.t('delete') || 'Delete'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
 
-    {/* Unsaved Changes Confirmation Modal */}
-    {showUnsavedConfirm && (
-      <div
-        className="fixed inset-0 z-[9999] flex items-center justify-center"
-        onClick={() => setShowUnsavedConfirm(false)}
-      >
-        <div className="absolute inset-0 bg-black/40 dark:bg-black/60" />
+      {/* Unsaved Changes Confirmation Modal */}
+      {showUnsavedConfirm && (
         <div
-          className="relative w-80 rounded-xl shadow-2xl bg-surface border border-border p-5"
-          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
+          onClick={() => setShowUnsavedConfirm(false)}
         >
-          <div className="flex flex-col items-center text-center">
-            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-3">
-              <ExclamationTriangleIcon className="w-5 h-5 text-amber-500" />
-            </div>
-            <h3 className="text-sm font-semibold text-foreground mb-2">
-              {i18nService.t('agentUnsavedTitle') || 'Unsaved Changes'}
-            </h3>
-            <p className="text-sm text-secondary mb-5">
-              {i18nService.t('agentUnsavedMessage') || 'You have unsaved changes. Are you sure you want to discard them?'}
-            </p>
-            <div className="flex items-center gap-3 w-full">
-              <button
-                type="button"
-                onClick={() => setShowUnsavedConfirm(false)}
-                className="flex-1 px-4 py-2 text-sm rounded-lg text-foreground border border-border hover:bg-surface-raised transition-colors"
-              >
-                {i18nService.t('cancel') || 'Cancel'}
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDiscard}
-                className="flex-1 px-4 py-2 text-sm rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
-              >
-                {i18nService.t('discard') || 'Discard'}
-              </button>
+          <div className="absolute inset-0 bg-black/40 dark:bg-black/60" />
+          <div
+            className="relative w-80 rounded-xl shadow-2xl bg-surface border border-border p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex flex-col items-center text-center">
+              <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mb-3">
+                <ExclamationTriangleIcon className="w-5 h-5 text-amber-500" />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground mb-2">
+                {i18nService.t('agentUnsavedTitle') || 'Unsaved Changes'}
+              </h3>
+              <p className="text-sm text-secondary mb-5">
+                {i18nService.t('agentUnsavedMessage') ||
+                  'You have unsaved changes. Are you sure you want to discard them?'}
+              </p>
+              <div className="flex items-center gap-3 w-full">
+                <button
+                  type="button"
+                  onClick={() => setShowUnsavedConfirm(false)}
+                  className="flex-1 px-4 py-2 text-sm rounded-lg text-foreground border border-border hover:bg-surface-raised transition-colors"
+                >
+                  {i18nService.t('cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDiscard}
+                  className="flex-1 px-4 py-2 text-sm rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                >
+                  {i18nService.t('discard') || 'Discard'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
     </>
   );
 };

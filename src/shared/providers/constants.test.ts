@@ -90,7 +90,7 @@ describe('ProviderRegistry', () => {
   test('lzclaw default base URL matches OpenAI compat path', () => {
     const def = ProviderRegistry.get(ProviderName.Lzclaw);
     expect(def?.defaultApiFormat).toBe(ApiFormat.OpenAI);
-    expect(def?.defaultBaseUrl).toBe('http://localhost:3000/v1');
+    expect(def?.defaultBaseUrl).toBe('https://lz.srmtj.com/v1');
   });
 
   test('every definition has non-empty defaultBaseUrl', () => {
@@ -137,13 +137,13 @@ describe('ProviderRegistry', () => {
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'anthropic')).toBe('https://open.bigmodel.cn/api/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'anthropic')).toBe('https://api.minimaxi.com/anthropic');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Qwen, 'anthropic')).toBe('https://dashscope.aliyuncs.com/apps/anthropic');
-      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'anthropic')).toBe('http://localhost:3000');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'anthropic')).toBe('https://lz.srmtj.com');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Ollama, 'anthropic')).toBe('http://localhost:11434');
     });
 
     test('returns openai url for providers with switchableBaseUrls', () => {
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.DeepSeek, 'openai')).toBe('https://api.deepseek.com');
-      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'openai')).toBe('http://localhost:3000/v1');
+      expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Lzclaw, 'openai')).toBe('https://lz.srmtj.com/v1');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Moonshot, 'openai')).toBe('https://api.moonshot.cn/v1');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Zhipu, 'openai')).toBe('https://open.bigmodel.cn/api/paas/v4');
       expect(ProviderRegistry.getSwitchableBaseUrl(ProviderName.Minimax, 'openai')).toBe('https://api.minimaxi.com/v1');
