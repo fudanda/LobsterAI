@@ -108,6 +108,13 @@ const REMOVED_PROVIDER_MODELS: Record<string, string[]> = {
 // so the models follow normal user-editable behavior (same as other models).
 // position: 'start' inserts at the beginning, 'end' appends at the end.
 const ADDED_PROVIDER_MODELS: Record<string, { models: Array<{ id: string; name: string; supportsImage?: boolean }>; position: 'start' | 'end' }> = {
+  lzclaw: {
+    models: [
+      { id: 'MiniMax-M2.7', name: 'MiniMax', supportsImage: false },
+      { id: 'qwen3.5-plus', name: 'Qwen', supportsImage: true },
+    ],
+    position: 'end',
+  },
   minimax: {
     models: [
       { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', supportsImage: false },

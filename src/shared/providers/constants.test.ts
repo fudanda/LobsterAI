@@ -1,8 +1,9 @@
-import { test, expect, describe } from 'vitest';
+import { describe,expect, test } from 'vitest';
+
 import {
+  ApiFormat,
   ProviderName,
   ProviderRegistry,
-  ApiFormat,
 } from './constants';
 
 describe('ProviderName constants', () => {
@@ -91,6 +92,12 @@ describe('ProviderRegistry', () => {
     const def = ProviderRegistry.get(ProviderName.Lzclaw);
     expect(def?.defaultApiFormat).toBe(ApiFormat.OpenAI);
     expect(def?.defaultBaseUrl).toBe('https://lz.srmtj.com/v1');
+  });
+
+  test('lzclaw default models include MiniMax and Qwen entries', () => {
+    const def = ProviderRegistry.get(ProviderName.Lzclaw);
+    expect(def?.defaultModels.some(model => model.id === 'MiniMax-M2.7' && model.name === 'MiniMax')).toBe(true);
+    expect(def?.defaultModels.some(model => model.id === 'qwen3.5-plus' && model.name === 'Qwen')).toBe(true);
   });
 
   test('every definition has non-empty defaultBaseUrl', () => {

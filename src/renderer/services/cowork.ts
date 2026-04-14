@@ -21,7 +21,6 @@ import {
 } from '../store/slices/coworkSlice';
 import type {
   CoworkApiConfig,
-  CoworkConfig,
   CoworkConfigUpdate,
   CoworkContinueOptions,
   CoworkMemoryStats,
@@ -222,6 +221,7 @@ class CoworkService {
     if (coworkResult?.success && coworkResult.config) {
       store.dispatch(setConfig({
         ...coworkResult.config,
+        skipMissedJobs: coworkResult.config.skipMissedJobs ?? false,
         openClawSessionPolicy: sessionPolicyResult?.success && sessionPolicyResult.config
           ? sessionPolicyResult.config
           : { keepAlive: '30d' },

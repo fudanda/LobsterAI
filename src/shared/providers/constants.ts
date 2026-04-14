@@ -193,6 +193,7 @@ const PROVIDER_DEFINITIONS = [
   },
   {
     id: ProviderName.Lzclaw,
+    label: 'Lzclaw',
     openClawProviderId: OpenClawProviderId.Lzclaw,
     // Must match defaultApiFormat (OpenAI): compat base is /v1, not the site root.
     defaultBaseUrl: 'https://lz.srmtj.com/v1',
@@ -204,7 +205,11 @@ const PROVIDER_DEFINITIONS = [
     },
     region: 'china',
     enPriority: 0,
-    defaultModels: [{ id: 'kimi-for-coding', name: 'kimi', supportsImage: false }],
+    defaultModels: [
+      { id: 'kimi-for-coding', name: 'kimi', supportsImage: false },
+      { id: 'MiniMax-M2.7', name: 'MiniMax', supportsImage: false },
+      { id: 'qwen3.5-plus', name: 'Qwen', supportsImage: true },
+    ],
   },
   {
     id: ProviderName.Moonshot,
