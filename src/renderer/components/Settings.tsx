@@ -1,78 +1,39 @@
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
-import {
-  ArrowTopRightOnSquareIcon,
-  ChatBubbleLeftIcon,
-  CheckCircleIcon,
-  Cog6ToothIcon,
-  CubeIcon,
-  InformationCircleIcon,
-  SignalIcon,
-  UserCircleIcon,
-  XCircleIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline';
+import { ArrowTopRightOnSquareIcon, ChatBubbleLeftIcon, CheckCircleIcon, Cog6ToothIcon, CpuChipIcon, CubeIcon, EnvelopeIcon, InformationCircleIcon, KeyIcon, ShieldCheckIcon,SignalIcon, UserCircleIcon, XCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import React, { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-
-import { ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
-import {
-  type AppConfig,
-  defaultConfig,
-  getCustomProviderDefaultName,
-  getProviderDisplayName,
-  getVisibleProviders,
-  isCustomProvider,
-} from '../config';
+import { ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
+import { type AppConfig, defaultConfig, getCustomProviderDefaultName, getProviderDisplayName, getVisibleProviders, isCustomProvider } from '../config';
 import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '../constants/app';
-import { ModelProvidersUi, ModelSettingsSoloProvider } from '../constants/modelProvidersUi';
+import { getProviderIcon } from '../providers/uiRegistry';
 import { apiService } from '../services/api';
 import type { AppUpdateInfo } from '../services/appUpdate';
+import { checkForAppUpdate } from '../services/appUpdate';
 import { configService } from '../services/config';
 import { coworkService } from '../services/cowork';
-import {
-  decryptSecret,
-  decryptWithPassword,
-  EncryptedPayload,
-  encryptWithPassword,
-  PasswordEncryptedPayload,
-} from '../services/encryption';
+import { decryptSecret, decryptWithPassword, EncryptedPayload, encryptWithPassword, PasswordEncryptedPayload } from '../services/encryption';
 import { i18nService, LanguageType } from '../services/i18n';
 import { imService } from '../services/im';
 import { themeService } from '../services/theme';
 import { selectCoworkConfig } from '../store/selectors/coworkSelectors';
+import { setAvailableModels } from '../store/slices/modelSlice';
 import { setAvailableModels } from '../store/slices/modelSlice';
 import type {
   CoworkAgentEngine,
   CoworkMemoryStats,
   CoworkUserMemoryEntry,
   OpenClawEngineStatus,
+  OpenClawSessionKeepAlive as OpenClawSessionKeepAliveValue,
 } from '../types/cowork';
 import Modal from './common/Modal';
 import ErrorMessage from './ErrorMessage';
 import BrainIcon from './icons/BrainIcon';
 import PencilIcon from './icons/PencilIcon';
 import PlusCircleIcon from './icons/PlusCircleIcon';
-import {
-  AnthropicIcon,
-  CustomProviderIcon,
-  DeepSeekIcon,
-  GeminiIcon,
-  GitHubCopilotIcon,
-  LzclawIcon,
-  MiniMaxIcon,
-  MoonshotIcon,
-  OllamaIcon,
-  OpenAIIcon,
-  OpenRouterIcon,
-  QwenIcon,
-  StepfunIcon,
-  VolcengineIcon,
-  XiaomiIcon,
-  YouDaoZhiYunIcon,
-  ZhipuIcon,
-} from './icons/providers';
+import { GitHubCopilotIcon } from './icons/providers';
 import TrashIcon from './icons/TrashIcon';
 import IMSettings from './im/IMSettings';
+import EmailSkillConfig from './skills/EmailSkillConfig';
 import ThemedSelect from './ui/ThemedSelect';
 
 type TabType =
@@ -116,26 +77,13 @@ const CUSTOM_PROVIDER_KEYS = [
 ] as const;
 
 const providerKeys = [
-  'openai',
-  'gemini',
-  'anthropic',
-  'deepseek',
-  'lzclaw',
-  'moonshot',
-  'zhipu',
-  'minimax',
-  'volcengine',
-  'qwen',
-  'youdaozhiyun',
-  'stepfun',
-  'xiaomi',
-  'openrouter',
-  'github-copilot',
-  'ollama',
+  ...Object.values(ProviderName).filter(id => id !== ProviderName.Custom && id !== ProviderName.LobsteraiServer),
   ...CUSTOM_PROVIDER_KEYS,
 ] as const;
 
-type ProviderType = (typeof providerKeys)[number];
+type BuiltinProviderType = ProviderName;
+type CustomProviderType = (typeof CUSTOM_PROVIDER_KEYS)[number];
+type ProviderType = BuiltinProviderType | CustomProviderType;
 type ProvidersConfig = NonNullable<AppConfig['providers']>;
 type ProviderConfig = ProvidersConfig[string];
 type Model = NonNullable<ProviderConfig['models']>[number];
@@ -264,6 +212,30 @@ const normalizeBaseUrl = (baseUrl: string): string =>
   baseUrl.trim().replace(/\/+$/, '').toLowerCase();
 const normalizeApiFormat = (value: unknown): 'anthropic' | 'openai' =>
   value === 'openai' ? 'openai' : 'anthropic';
+const providerRequiresApiKey = (provider: ProviderType) => provider !== 'ollama' && provider !== 'github-copilot';
+const hasProviderAuthConfigured = (provider: ProviderType, config: ProviderConfig): boolean => {
+  if (provider === 'ollama') {
+    return true;
+  }
+
+  if (provider === 'minimax') {
+    if (config.authType === 'apikey') {
+      return config.apiKey.trim().length > 0;
+    }
+    return (config.oauthAccessToken?.trim().length ?? 0) > 0;
+  }
+
+  return config.apiKey.trim().length > 0;
+};
+const normalizeBaseUrl = (baseUrl: string): string => baseUrl.trim().replace(/\/+$/, '').toLowerCase();
+const normalizeApiFormat = (value: unknown): 'anthropic' | 'openai' => (
+  value === 'openai' ? 'openai' : 'anthropic'
+);
+const ABOUT_CONTACT_EMAIL = 'lobsterai.project@rd.netease.com';
+const ABOUT_USER_MANUAL_URL = 'https://lobsterai.youdao.com/#/docs/lobsterai_user_manual';
+const ABOUT_USER_COMMUNITY_URL = 'https://lobsterai.youdao.com/#/about';
+const ABOUT_SERVICE_TERMS_URL = 'https://c.youdao.com/dict/hardware/lobsterai/lobsterai_service.html';
+
 // MiniMax Portal OAuth constants
 const MINIMAX_OAUTH_CLIENT_ID = '78257093-7e40-4613-99e0-527b14b39113';
 const MINIMAX_OAUTH_SCOPE = 'group_id profile model.completion';
@@ -688,13 +660,13 @@ const Settings: React.FC<SettingsProps> = ({
   const [isUpdatingPreventSleep, setIsUpdatingPreventSleep] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const buildNoticeMessage = (): string | null => {
+  const buildNoticeMessage = useCallback((): string | null => {
     if (noticeI18nKey) {
       const base = i18nService.t(noticeI18nKey);
       return noticeExtra ? `${base} (${noticeExtra})` : base;
     }
     return notice ?? null;
-  };
+  }, [notice, noticeExtra, noticeI18nKey]);
 
   const [noticeMessage, setNoticeMessage] = useState<string | null>(() => buildNoticeMessage());
   const [testResult, setTestResult] = useState<ProviderConnectionTestResult | null>(null);
@@ -782,6 +754,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [skipMissedJobs, setSkipMissedJobs] = useState<boolean>(
     coworkConfig.skipMissedJobs ?? false,
   );
+  const [openClawSessionKeepAlive, setOpenClawSessionKeepAlive] = useState<OpenClawSessionKeepAliveValue>(
+    coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d',
+  );
   const [coworkMemoryEntries, setCoworkMemoryEntries] = useState<CoworkUserMemoryEntry[]>([]);
   const [coworkMemoryStats, setCoworkMemoryStats] = useState<CoworkMemoryStats | null>(null);
   const [coworkMemoryListLoading, setCoworkMemoryListLoading] = useState<boolean>(false);
@@ -802,6 +777,7 @@ const Settings: React.FC<SettingsProps> = ({
     setCoworkMemoryEnabled(coworkConfig.memoryEnabled ?? true);
     setCoworkMemoryLlmJudgeEnabled(coworkConfig.memoryLlmJudgeEnabled ?? false);
     setSkipMissedJobs(coworkConfig.skipMissedJobs ?? false);
+    setOpenClawSessionKeepAlive(coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d');
   }, [
     coworkConfig.agentEngine,
     coworkConfig.memoryEnabled,
@@ -1073,18 +1049,21 @@ const Settings: React.FC<SettingsProps> = ({
           ...config.shortcuts,
         }));
       }
-    } catch (error) {
+    } catch {
       setError('Failed to load settings');
     }
   }, []);
 
   useEffect(() => {
+    const initialThemeId = initialThemeIdRef.current;
+    const initialTheme = initialThemeRef.current;
+    const initialLanguage = initialLanguageRef.current;
     return () => {
       if (didSaveRef.current) {
         return;
       }
-      themeService.restoreTheme(initialThemeIdRef.current, initialThemeRef.current);
-      i18nService.setLanguage(initialLanguageRef.current, { persist: false });
+      themeService.restoreTheme(initialThemeId, initialTheme);
+      i18nService.setLanguage(initialLanguage, { persist: false });
     };
   }, []);
 
@@ -1097,7 +1076,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   useEffect(() => {
     setNoticeMessage(buildNoticeMessage());
-  }, [notice, noticeI18nKey, noticeExtra]);
+  }, [buildNoticeMessage]);
 
   useEffect(() => {
     if (initialTab) {
@@ -1405,8 +1384,8 @@ const Settings: React.FC<SettingsProps> = ({
             minimax: {
               ...prev.minimax,
               enabled: true,
-              apiKey: tokenPayload.access_token!,
-              baseUrl,
+              oauthAccessToken: tokenPayload.access_token!,
+              oauthBaseUrl: baseUrl,
               apiFormat: 'anthropic',
               authType: 'oauth',
               oauthRefreshToken: tokenPayload.refresh_token,
@@ -1441,7 +1420,9 @@ const Settings: React.FC<SettingsProps> = ({
       ...prev,
       minimax: {
         ...prev.minimax,
-        apiKey: '',
+        enabled: false,
+        oauthAccessToken: undefined,
+        oauthBaseUrl: undefined,
         oauthRefreshToken: undefined,
         oauthTokenExpiresAt: undefined,
       },
@@ -1453,7 +1434,8 @@ const Settings: React.FC<SettingsProps> = ({
     coworkAgentEngine !== coworkConfig.agentEngine ||
     coworkMemoryEnabled !== coworkConfig.memoryEnabled ||
     coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled ||
-    skipMissedJobs !== (coworkConfig.skipMissedJobs ?? false);
+    skipMissedJobs !== (coworkConfig.skipMissedJobs ?? false)
+    || openClawSessionKeepAlive !== (coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d');
   const isOpenClawAgentEngine = coworkAgentEngine === 'openclaw';
 
   const openClawProgressPercent = useMemo(() => {
@@ -1616,16 +1598,16 @@ const Settings: React.FC<SettingsProps> = ({
   const toggleProviderEnabled = (provider: ProviderType) => {
     const providerConfig = providers[provider];
     const isEnabling = !providerConfig.enabled;
-    const missingApiKey = providerRequiresApiKey(provider) && !providerConfig.apiKey.trim();
-
-    if (isEnabling && missingApiKey) {
-      setError(i18nService.t('apiKeyRequired'));
-      return;
-    }
+    const hasValidAuth = hasProviderAuthConfigured(provider, providerConfig);
 
     // GitHub Copilot requires device code auth — redirect to sign-in flow
     if (provider === 'github-copilot' && isEnabling && !providerConfig.apiKey.trim()) {
       handleCopilotSignIn();
+      return;
+    }
+
+    if (isEnabling && !hasValidAuth) {
+      setError(i18nService.t('apiKeyRequired'));
       return;
     }
 
@@ -1694,8 +1676,8 @@ const Settings: React.FC<SettingsProps> = ({
         setCopilotError(result.error || 'Authentication failed');
         setCopilotAuthStatus('error');
       }
-    } catch (error: any) {
-      setCopilotError(error.message || 'Authentication failed');
+    } catch (error: unknown) {
+      setCopilotError(error instanceof Error ? error.message : 'Authentication failed');
       setCopilotAuthStatus('error');
     }
   };
@@ -1739,10 +1721,12 @@ const Settings: React.FC<SettingsProps> = ({
       const normalizedProviders = Object.fromEntries(
         Object.entries(providers).map(([providerKey, providerConfig]) => {
           const apiFormat = getEffectiveApiFormat(providerKey, providerConfig.apiFormat);
+          const hasValidAuth = hasProviderAuthConfigured(providerKey as ProviderType, providerConfig);
           return [
             providerKey,
             {
               ...providerConfig,
+              enabled: providerConfig.enabled && hasValidAuth,
               apiFormat,
               baseUrl: resolveBaseUrl(
                 providerKey as ProviderType,
@@ -1789,16 +1773,6 @@ const Settings: React.FC<SettingsProps> = ({
       let apiKeyToUse = primaryProvider.apiKey;
       let baseUrlToUse = primaryProvider.baseUrl;
 
-      // For Qwen provider, check if OAuth should be used
-      if (firstEnabledProvider && firstEnabledProvider[0] === 'qwen') {
-        const qwenConfig = firstEnabledProvider[1] as any;
-        if (!qwenConfig.apiKey && qwenConfig.oauthCredentials) {
-          // Use OAuth token as API key placeholder
-          apiKeyToUse = 'qwen-oauth';
-          baseUrlToUse = qwenConfig.oauthCredentials.resourceUrl || qwenConfig.baseUrl;
-        }
-      }
-
       apiService.setConfig({
         apiKey: apiKeyToUse,
         baseUrl: baseUrlToUse,
@@ -1835,6 +1809,12 @@ const Settings: React.FC<SettingsProps> = ({
           skipMissedJobs,
         });
         if (!updated) {
+          throw new Error(i18nService.t('coworkConfigSaveFailed'));
+        }
+        const savedSessionPolicy = await coworkService.updateSessionPolicy({
+          keepAlive: openClawSessionKeepAlive,
+        });
+        if (!savedSessionPolicy) {
           throw new Error(i18nService.t('coworkConfigSaveFailed'));
         }
       }
@@ -2310,7 +2290,7 @@ const Settings: React.FC<SettingsProps> = ({
       let payload: ProvidersImportPayload;
       try {
         payload = JSON.parse(raw) as ProvidersImportPayload;
-      } catch (parseError) {
+      } catch {
         setError(i18nService.t('invalidProvidersFile'));
         return;
       }
@@ -2536,7 +2516,7 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   // 渲染标签页
-  const sidebarTabs: { key: TabType; label: string; icon: React.ReactNode }[] = useMemo(() => {
+  const sidebarTabs: { key: TabType; label: string; icon: React.ReactNode }[] = (() => {
     const allTabs = [
       {
         key: 'general' as TabType,
@@ -2584,7 +2564,7 @@ const Settings: React.FC<SettingsProps> = ({
       return allTabs.filter(tab => ui[`settings.${tab.key}`] !== 'hide');
     }
     return allTabs;
-  }, [language, enterpriseConfig]);
+  })();
 
   const activeTabLabel = useMemo(() => {
     return sidebarTabs.find(t => t.key === activeTab)?.label ?? '';
@@ -3160,12 +3140,12 @@ const Settings: React.FC<SettingsProps> = ({
               {Object.entries(visibleProviders).map(([provider, config]) => {
                 const providerKey = provider as ProviderType;
                 const isCustom = isCustomProvider(provider);
-                const providerInfo = providerMeta[providerKey];
-                const missingApiKey = providerRequiresApiKey(providerKey) && !config.apiKey.trim();
-                const canToggleProvider = config.enabled || !missingApiKey;
+                const hasValidAuth = hasProviderAuthConfigured(providerKey, config);
+                const effectiveEnabled = config.enabled && hasValidAuth;
+                const canToggleProvider = effectiveEnabled || hasValidAuth;
                 const displayLabel = isCustom
                   ? (config as ProviderConfig).displayName || getCustomProviderDefaultName(provider)
-                  : (providerInfo?.label ?? getProviderDisplayName(provider));
+                  : (ProviderRegistry.get(providerKey)?.label ?? getProviderDisplayName(provider));
                 return (
                   <div
                     key={provider}
@@ -3179,7 +3159,7 @@ const Settings: React.FC<SettingsProps> = ({
                     <div className="flex flex-1 items-center min-w-0">
                       <div className="mr-2 flex h-7 w-7 items-center justify-center shrink-0">
                         <span className="text-foreground">
-                          {isCustom ? <CustomProviderIcon /> : providerInfo?.icon}
+                          {getProviderIcon(provider)}
                         </span>
                       </div>
                       <div className="flex flex-col min-w-0">
@@ -3221,7 +3201,7 @@ const Settings: React.FC<SettingsProps> = ({
                       <div
                         title={!canToggleProvider ? i18nService.t('configureApiKey') : undefined}
                         className={`w-7 h-4 rounded-full flex items-center transition-colors ${
-                          config.enabled ? 'bg-primary' : 'bg-gray-400 dark:bg-gray-600'
+                          effectiveEnabled ? 'bg-primary' : 'bg-gray-400 dark:bg-gray-600'
                         } ${
                           canToggleProvider ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'
                         }`}
@@ -3235,7 +3215,7 @@ const Settings: React.FC<SettingsProps> = ({
                       >
                         <div
                           className={`w-3 h-3 rounded-full bg-white shadow-md transform transition-transform ${
-                            config.enabled ? 'translate-x-3.5' : 'translate-x-0.5'
+                            effectiveEnabled ? 'translate-x-3.5' : 'translate-x-0.5'
                           }`}
                         />
                       </div>
@@ -3264,16 +3244,16 @@ const Settings: React.FC<SettingsProps> = ({
                     {isCustomProvider(activeProvider)
                       ? (providers[activeProvider] as ProviderConfig)?.displayName ||
                         getCustomProviderDefaultName(activeProvider)
-                      : (providerMeta[activeProvider]?.label ??
+                      : (ProviderRegistry.get(activeProvider)?.label ??
                         getProviderDisplayName(activeProvider))}{' '}
                     {i18nService.t('providerSettings')}
                   </h3>
-                  {providerLinks[activeProvider]?.website && (
+                  {ProviderRegistry.get(activeProvider)?.website && (
                     <button
                       type="button"
                       onClick={() =>
                         void window.electron.shell.openExternal(
-                          providerLinks[activeProvider]!.website,
+                          ProviderRegistry.get(activeProvider)!.website!,
                         )
                       }
                       className="p-0.5 rounded text-secondary hover:text-primary transition-colors"
@@ -3286,7 +3266,7 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <div
                   className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
-                    providers[activeProvider].enabled
+                    providers[activeProvider].enabled && hasProviderAuthConfigured(activeProvider, providers[activeProvider])
                       ? 'bg-green-500/20 text-green-600 dark:text-green-400'
                       : 'bg-red-500/20 text-red-600 dark:text-red-400'
                   }`}
@@ -3300,9 +3280,12 @@ const Settings: React.FC<SettingsProps> = ({
               {/* MiniMax OAuth auth section */}
               {activeProvider === 'minimax' && (
                 <div className="space-y-3">
-                  {/* Auth type tabs */}
+                  {/* Auth type radio cards */}
                   <div>
-                    <div className="flex rounded-xl overflow-hidden border border-border mb-3">
+                    <p className="text-xs font-medium text-foreground mb-2">
+                      {i18nService.t('minimaxAuthMethodLabel')}
+                    </p>
+                    <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() =>
@@ -3341,12 +3324,12 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           {i18nService.t('apiKey')}
                         </label>
-                        {providerLinks.minimax?.apiKey && (
+                        {ProviderRegistry.get('minimax')?.apiKeyUrl && (
                           <button
                             type="button"
                             onClick={() =>
                               void window.electron.shell.openExternal(
-                                providerLinks.minimax!.apiKey!,
+                                ProviderRegistry.get('minimax')!.apiKeyUrl!,
                               )
                             }
                             className="text-[11px] text-claude-accent hover:underline transition-colors"
@@ -3402,7 +3385,7 @@ const Settings: React.FC<SettingsProps> = ({
                   {minimaxIsOAuthMode && (
                     <div className="space-y-2 min-h-[68px]">
                       {/* Already logged in */}
-                      {minimaxOAuthPhase.kind === 'idle' && providers.minimax.apiKey && (
+                      {minimaxOAuthPhase.kind === 'idle' && providers.minimax.oauthAccessToken && (
                         <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20 space-y-2">
                           <p className="text-xs text-green-600 dark:text-green-400 font-medium">
                             {i18nService.t('minimaxOAuthLoggedIn')}
@@ -3427,7 +3410,7 @@ const Settings: React.FC<SettingsProps> = ({
                       )}
 
                       {/* Not logged in yet — show region selector + login button */}
-                      {minimaxOAuthPhase.kind === 'idle' && !providers.minimax.apiKey && (
+                      {minimaxOAuthPhase.kind === 'idle' && !providers.minimax.oauthAccessToken && (
                         <div className="space-y-2">
                           <div>
                             <label className="block text-xs font-medium text-foreground mb-1">
@@ -3565,12 +3548,12 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           {i18nService.t('apiKey')}
                         </label>
-                        {providerLinks[activeProvider]?.apiKey && (
+                        {ProviderRegistry.get(activeProvider)?.apiKeyUrl && (
                           <button
                             type="button"
                             onClick={() =>
                               void window.electron.shell.openExternal(
-                                providerLinks[activeProvider]!.apiKey!,
+                                ProviderRegistry.get(activeProvider)!.apiKeyUrl!,
                               )
                             }
                             className="text-[11px] text-claude-accent hover:underline transition-colors"
@@ -3634,11 +3617,11 @@ const Settings: React.FC<SettingsProps> = ({
                         >
                           API Key
                         </label>
-                        {providerLinks.qwen?.apiKey && (
+                        {ProviderRegistry.get('qwen')?.apiKeyUrl && (
                           <button
                             type="button"
                             onClick={() =>
-                              void window.electron.shell.openExternal(providerLinks.qwen!.apiKey!)
+                              void window.electron.shell.openExternal(ProviderRegistry.get('qwen')!.apiKeyUrl!)
                             }
                             className="text-[11px] text-claude-accent hover:underline transition-colors"
                           >
@@ -4638,7 +4621,7 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
 
               <div className="flex items-center gap-2 text-xs text-secondary">
-                <span>{providerMeta[testResult.provider]?.label ?? testResult.provider}</span>
+                <span>{ProviderRegistry.get(testResult.provider)?.label ?? testResult.provider}</span>
                 <span className="text-[11px]">•</span>
                 <span
                   className={`inline-flex items-center gap-1 ${testResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}

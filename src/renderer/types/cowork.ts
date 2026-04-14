@@ -15,6 +15,20 @@ export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result
 export type CoworkExecutionMode = 'auto' | 'local' | 'sandbox';
 export type CoworkAgentEngine = 'openclaw' | 'yd_cowork';
 
+export const OpenClawSessionKeepAlive = {
+  OneDay: '1d',
+  SevenDays: '7d',
+  ThirtyDays: '30d',
+  OneYear: '365d',
+} as const;
+
+export type OpenClawSessionKeepAlive =
+  typeof OpenClawSessionKeepAlive[keyof typeof OpenClawSessionKeepAlive];
+
+export interface OpenClawSessionPolicyConfig {
+  keepAlive: OpenClawSessionKeepAlive;
+}
+
 // Cowork message metadata
 export interface CoworkMessageMetadata {
   toolName?: string;
@@ -68,6 +82,7 @@ export interface CoworkConfig {
   memoryGuardLevel: 'strict' | 'standard' | 'relaxed';
   memoryUserMemoriesMaxItems: number;
   skipMissedJobs: boolean;
+  openClawSessionPolicy: OpenClawSessionPolicyConfig;
 }
 
 export type CoworkConfigUpdate = Partial<Pick<

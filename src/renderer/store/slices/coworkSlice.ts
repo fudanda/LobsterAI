@@ -1,11 +1,12 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+
 import type {
-  CoworkSession,
-  CoworkSessionSummary,
-  CoworkMessage,
   CoworkConfig,
+  CoworkMessage,
   CoworkPermissionRequest,
+  CoworkSession,
   CoworkSessionStatus,
+  CoworkSessionSummary,
 } from '../../types/cowork';
 import { removeSessionFromState, removeSessionsFromState } from './coworkDeleteState';
 
@@ -53,6 +54,9 @@ const initialState: CoworkState = {
     memoryGuardLevel: 'strict',
     memoryUserMemoriesMaxItems: 12,
     skipMissedJobs: false,
+    openClawSessionPolicy: {
+      keepAlive: '30d',
+    },
   },
 };
 
