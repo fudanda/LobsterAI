@@ -1589,7 +1589,6 @@ const IMSettings: React.FC = () => {
                 i18nService.t('imTelegramGuideStep3'),
                 i18nService.t('imTelegramGuideStep4'),
               ]}
-                guideUrl={PlatformRegistry.guideUrl('telegram')}
             />
             {/* Bot Token */}
             <div className="space-y-1.5">
@@ -1909,7 +1908,6 @@ const IMSettings: React.FC = () => {
                 i18nService.t('imDiscordGuideStep5'),
                 i18nService.t('imDiscordGuideStep6'),
               ]}
-                guideUrl={PlatformRegistry.guideUrl('discord')}
             />
             {/* Bot Token */}
             <div className="space-y-1.5">
@@ -2461,7 +2459,6 @@ const IMSettings: React.FC = () => {
                 i18nService.t('imWeixinGuideStep2'),
                 i18nService.t('imWeixinGuideStep3'),
               ]}
-                guideUrl={PlatformRegistry.guideUrl('weixin')}
             />
 
             {/* Connectivity test */}
@@ -2533,7 +2530,6 @@ const IMSettings: React.FC = () => {
                 i18nService.t('imWecomGuideStep2'),
                 i18nService.t('imWecomGuideStep3'),
               ]}
-                guideUrl={PlatformRegistry.guideUrl('wecom')}
             />
             {/* Bot ID */}
             <div className="space-y-1.5">
@@ -2775,7 +2771,6 @@ const IMSettings: React.FC = () => {
                 i18nService.t('imPopoGuideStep2'),
                 i18nService.t('imPopoGuideStep3'),
               ]}
-                guideUrl={PlatformRegistry.guideUrl('popo')}
             />
 
             {/* Connection Mode selector */}

@@ -1,80 +1,79 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import Modal from './common/Modal';
-import { configService } from '../services/config';
-import { apiService } from '../services/api';
-import type { AppUpdateInfo } from '../services/appUpdate';
-import { themeService } from '../services/theme';
-import { i18nService, LanguageType } from '../services/i18n';
-import {
-  decryptSecret,
-  encryptWithPassword,
-  decryptWithPassword,
-  EncryptedPayload,
-  PasswordEncryptedPayload,
-} from '../services/encryption';
-import { coworkService } from '../services/cowork';
-import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '../constants/app';
-import { ModelProvidersUi, ModelSettingsSoloProvider } from '../constants/modelProvidersUi';
-import ErrorMessage from './ErrorMessage';
-import {
-  XMarkIcon,
-  Cog6ToothIcon,
-  SignalIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  CubeIcon,
-  ChatBubbleLeftIcon,
-  EnvelopeIcon,
-  InformationCircleIcon,
-  UserCircleIcon,
-  ArrowTopRightOnSquareIcon,
-} from '@heroicons/react/24/outline';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
-import PlusCircleIcon from './icons/PlusCircleIcon';
-import TrashIcon from './icons/TrashIcon';
-import PencilIcon from './icons/PencilIcon';
-import BrainIcon from './icons/BrainIcon';
+import {
+  ArrowTopRightOnSquareIcon,
+  ChatBubbleLeftIcon,
+  CheckCircleIcon,
+  Cog6ToothIcon,
+  CubeIcon,
+  InformationCircleIcon,
+  SignalIcon,
+  UserCircleIcon,
+  XCircleIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline';
+import React, { useCallback,useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { setAvailableModels } from '../store/slices/modelSlice';
-import { selectCoworkConfig } from '../store/selectors/coworkSelectors';
-import ThemedSelect from './ui/ThemedSelect';
-import type {
-  CoworkAgentEngine,
-  OpenClawEngineStatus,
-  CoworkUserMemoryEntry,
-  CoworkMemoryStats,
-} from '../types/cowork';
-import IMSettings from './im/IMSettings';
-import { imService } from '../services/im';
-import EmailSkillConfig from './skills/EmailSkillConfig';
+
 import { ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
 import {
-  defaultConfig,
   type AppConfig,
-  getVisibleProviders,
-  isCustomProvider,
+  defaultConfig,
   getCustomProviderDefaultName,
   getProviderDisplayName,
+  getVisibleProviders,
+  isCustomProvider,
 } from '../config';
+import { APP_ID, EXPORT_FORMAT_TYPE, EXPORT_PASSWORD } from '../constants/app';
+import { ModelProvidersUi, ModelSettingsSoloProvider } from '../constants/modelProvidersUi';
+import { apiService } from '../services/api';
+import type { AppUpdateInfo } from '../services/appUpdate';
+import { configService } from '../services/config';
+import { coworkService } from '../services/cowork';
 import {
-  OpenAIIcon,
-  DeepSeekIcon,
-  LzclawIcon,
-  GeminiIcon,
+  decryptSecret,
+  decryptWithPassword,
+  EncryptedPayload,
+  encryptWithPassword,
+  PasswordEncryptedPayload,
+} from '../services/encryption';
+import { i18nService, LanguageType } from '../services/i18n';
+import { imService } from '../services/im';
+import { themeService } from '../services/theme';
+import { selectCoworkConfig } from '../store/selectors/coworkSelectors';
+import { setAvailableModels } from '../store/slices/modelSlice';
+import type {
+  CoworkAgentEngine,
+  CoworkMemoryStats,
+  CoworkUserMemoryEntry,
+  OpenClawEngineStatus,
+} from '../types/cowork';
+import Modal from './common/Modal';
+import ErrorMessage from './ErrorMessage';
+import BrainIcon from './icons/BrainIcon';
+import PencilIcon from './icons/PencilIcon';
+import PlusCircleIcon from './icons/PlusCircleIcon';
+import {
   AnthropicIcon,
-  MoonshotIcon,
-  ZhipuIcon,
+  CustomProviderIcon,
+  DeepSeekIcon,
+  GeminiIcon,
+  GitHubCopilotIcon,
+  LzclawIcon,
   MiniMaxIcon,
-  YouDaoZhiYunIcon,
+  MoonshotIcon,
+  OllamaIcon,
+  OpenAIIcon,
+  OpenRouterIcon,
   QwenIcon,
-  XiaomiIcon,
   StepfunIcon,
   VolcengineIcon,
-  OpenRouterIcon,
-  OllamaIcon,
-  GitHubCopilotIcon,
-  CustomProviderIcon,
+  XiaomiIcon,
+  YouDaoZhiYunIcon,
+  ZhipuIcon,
 } from './icons/providers';
+import TrashIcon from './icons/TrashIcon';
+import IMSettings from './im/IMSettings';
+import ThemedSelect from './ui/ThemedSelect';
 
 type TabType =
   | 'general'
@@ -537,6 +536,13 @@ const SEND_SHORTCUT_OPTIONS = [
 
 const isMacPlatform = navigator.platform.includes('Mac');
 
+const resolveVisibleSettingsTab = (tab?: TabType): TabType => {
+  if (!tab || tab === 'email') {
+    return 'general';
+  }
+  return tab;
+};
+
 const ShortcutRecorder: React.FC<{ value: string; onChange: (v: string) => void }> = ({
   value,
   onChange,
@@ -671,7 +677,7 @@ const Settings: React.FC<SettingsProps> = ({
 }: SettingsProps) => {
   const dispatch = useDispatch();
   // 状态
-  const [activeTab, setActiveTab] = useState<TabType>(initialTab ?? 'general');
+  const [activeTab, setActiveTab] = useState<TabType>(resolveVisibleSettingsTab(initialTab));
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
   const [themeId, setThemeId] = useState<string>(themeService.getThemeId());
   const [language, setLanguage] = useState<LanguageType>('zh');
@@ -1095,7 +1101,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   useEffect(() => {
     if (initialTab) {
-      setActiveTab(initialTab);
+      setActiveTab(resolveVisibleSettingsTab(initialTab));
     }
   }, [initialTab]);
 
@@ -2548,11 +2554,11 @@ const Settings: React.FC<SettingsProps> = ({
         label: i18nService.t('imBot'),
         icon: <ChatBubbleLeftIcon className="h-5 w-5" />,
       },
-      {
-        key: 'email' as TabType,
-        label: i18nService.t('emailTab'),
-        icon: <EnvelopeIcon className="h-5 w-5" />,
-      },
+      // {
+      //   key: 'email' as TabType,
+      //   label: i18nService.t('emailTab'),
+      //   icon: <EnvelopeIcon className="h-5 w-5" />,
+      // },
       {
         key: 'coworkMemory' as TabType,
         label: i18nService.t('coworkMemoryTitle'),
@@ -2959,8 +2965,8 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         );
 
-      case 'email':
-        return <EmailSkillConfig />;
+      // case 'email':
+      //   return <EmailSkillConfig />;
 
       case 'coworkAgentEngine':
         return (
@@ -3021,12 +3027,12 @@ const Settings: React.FC<SettingsProps> = ({
                 {i18nService.t('coworkMemoryTitle')}
               </div>
               {/* Memory toggle hidden – always enabled by default */}
-              <div className="mt-2 text-xs text-secondary">
+              {/* <div className="mt-2 text-xs text-secondary">
                 <span className="font-medium">{i18nService.t('coworkMemoryFilePath')}:</span>{' '}
                 <span className="break-all font-mono opacity-80">
                   {joinWorkspacePath(coworkConfig.workingDirectory, 'MEMORY.md')}
                 </span>
-              </div>
+              </div> */}
             </div>
 
             <div className="space-y-4 rounded-xl border px-4 py-4 border-border">
@@ -4263,13 +4269,13 @@ const Settings: React.FC<SettingsProps> = ({
                 <div key={filename} className="space-y-2">
                   <div className="text-xs font-medium text-secondary">
                     {i18nService.t(titleKey)}
-                    <span className="ml-1.5 font-normal opacity-60">
+                    {/* <span className="ml-1.5 font-normal opacity-60">
                       （{i18nService.t('coworkBootstrapStoragePath')}：
                       <span className="font-mono">
                         {joinWorkspacePath(coworkConfig.workingDirectory, filename)}
                       </span>
                       ）
-                    </span>
+                    </span> */}
                   </div>
                   <textarea
                     value={value}
@@ -4286,13 +4292,13 @@ const Settings: React.FC<SettingsProps> = ({
             <div className="space-y-3 rounded-xl border px-4 py-4 border-border">
               <div className="text-sm font-medium text-foreground">
                 {i18nService.t('coworkBootstrapUserTitle')}
-                <span className="ml-1.5 text-xs font-normal opacity-60 text-secondary">
+                {/* <span className="ml-1.5 text-xs font-normal opacity-60 text-secondary">
                   （{i18nService.t('coworkBootstrapStoragePath')}：
                   <span className="font-mono">
                     {joinWorkspacePath(coworkConfig.workingDirectory, 'USER.md')}
                   </span>
                   ）
-                </span>
+                </span> */}
               </div>
               <textarea
                 value={bootstrapUser}
@@ -4466,6 +4472,15 @@ const Settings: React.FC<SettingsProps> = ({
                   </button>
                 </div>
               )} */}
+            </div>
+
+            <div className="w-full mt-6 overflow-hidden rounded-xl border border-border bg-white">
+              <iframe
+                src="https://lz.srmtj.com/lzclaw.html"
+                title="LZClaw"
+                loading="lazy"
+                className="block h-[520px] w-full border-0 bg-white"
+              />
             </div>
 
             {/* Footer */}
