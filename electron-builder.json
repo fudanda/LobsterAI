@@ -54,8 +54,8 @@
   ],
   "protocols": [
     {
-      "name": "LobsterAI",
-      "schemes": ["lobsterai"]
+      "name": "LZClaw",
+      "schemes": ["lzclaw"]
     }
   ],
   "mac": {
@@ -147,6 +147,7 @@
     "target": [
       "nsis"
     ],
+    "artifactName": "${productName}-${version}.${ext}",
     "icon": "build/icons/win/icon.ico",
     "requestedExecutionLevel": "asInvoker",
     "extraResources": [

@@ -13,8 +13,8 @@
 !macro customInit
   ; ── Kill every process that might hold file handles in the install dir ──
   ;
-  ; 1. LobsterAI.exe — the main app AND the OpenClaw gateway (ELECTRON_RUN_AS_NODE)
-  ; 2. node.exe whose binary lives inside the LobsterAI install tree
+  ; 1. LZClaw.exe — the main app AND the OpenClaw gateway (ELECTRON_RUN_AS_NODE)
+  ; 2. node.exe whose binary lives inside the LZClaw install tree
   ;    (Web Search bridge server, MCP servers spawned with detached:true)
   ;
   ; Stop-Process -Force is equivalent to taskkill /F — the processes have no
@@ -24,12 +24,12 @@
   ; uninstaller (which may lack our customUnInit fix) is never invoked.
 
   nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -Command "\
-    Stop-Process -Name LobsterAI -Force -ErrorAction SilentlyContinue;\
-    Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" } | Stop-Process -Force -ErrorAction SilentlyContinue;\
+    Stop-Process -Name LZClaw -Force -ErrorAction SilentlyContinue;\
+    Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LZClaw*\" } | Stop-Process -Force -ErrorAction SilentlyContinue;\
     for ($$i = 0; $$i -lt 15; $$i++) {\
       $$procs = @();\
-      $$procs += Get-Process -Name LobsterAI -ErrorAction SilentlyContinue;\
-      $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" };\
+      $$procs += Get-Process -Name LZClaw -ErrorAction SilentlyContinue;\
+      $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LZClaw*\" };\
       if ($$procs.Count -eq 0) { break };\
       Start-Sleep -Milliseconds 500;\
     }"'
@@ -59,10 +59,10 @@
 !macro customInstall
   ; ─── Install Timing Log ───
   ; Write timestamps to help diagnose slow installation phases.
-  ; Log file: %APPDATA%\LobsterAI\install-timing.log
+  ; Log file: %APPDATA%\LZClaw\install-timing.log
 
-  CreateDirectory "$APPDATA\LobsterAI"
-  FileOpen $2 "$APPDATA\LobsterAI\install-timing.log" w
+  CreateDirectory "$APPDATA\LZClaw"
+  FileOpen $2 "$APPDATA\LZClaw\install-timing.log" w
 
   ${GetTime} "" "L" $3 $4 $5 $6 $7 $8 $9
   FileWrite $2 "extract-done: $5-$4-$3 $6:$7:$8$\r$\n"
@@ -124,16 +124,16 @@
   ; Kill all running app instances (main app + OpenClaw gateway + detached
   ; node.exe services) before the uninstaller's built-in process check.
   ; Without this, the uninstaller detects the OpenClaw gateway process
-  ; (also named LobsterAI.exe) and shows an "app cannot be closed" dialog
+  ; (also named LZClaw.exe) and shows an "app cannot be closed" dialog
   ; where even "Retry" never succeeds — because the gateway has no UI window
   ; for the user to close.
   nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -Command "\
-    Stop-Process -Name LobsterAI -Force -ErrorAction SilentlyContinue;\
-    Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" } | Stop-Process -Force -ErrorAction SilentlyContinue;\
+    Stop-Process -Name LZClaw -Force -ErrorAction SilentlyContinue;\
+    Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LZClaw*\" } | Stop-Process -Force -ErrorAction SilentlyContinue;\
     for ($$i = 0; $$i -lt 15; $$i++) {\
       $$procs = @();\
-      $$procs += Get-Process -Name LobsterAI -ErrorAction SilentlyContinue;\
-      $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LobsterAI*\" };\
+      $$procs += Get-Process -Name LZClaw -ErrorAction SilentlyContinue;\
+      $$procs += Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"*LZClaw*\" };\
       if ($$procs.Count -eq 0) { break };\
       Start-Sleep -Milliseconds 500;\
     }"'
