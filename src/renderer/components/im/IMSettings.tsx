@@ -29,13 +29,9 @@ import NimInstanceSettings from './NimInstanceSettings';
 import { nimFallbackInstanceSchema, nimFallbackUiHints } from './nimSchemaFallback';
 import QQInstanceSettings from './QQInstanceSettings';
 import type { UiHint } from './SchemaForm';
+import { SchemaForm } from './SchemaForm';
 import TelegramInstanceSettings from './TelegramInstanceSettings';
 import WecomInstanceSettings from './WecomInstanceSettings';
-import DingTalkInstanceSettings from './DingTalkInstanceSettings';
-import FeishuInstanceSettings from './FeishuInstanceSettings';
-import QQInstanceSettings from './QQInstanceSettings';
-import type { UiHint } from './SchemaForm';
-import { SchemaForm } from './SchemaForm';
 
 
 

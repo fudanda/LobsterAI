@@ -1,4 +1,3 @@
-import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { LoginPageBaseUrl } from '@shared/auth/constants';
 import type { WebContents } from 'electron';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, session, shell } from 'electron';

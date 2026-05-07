@@ -612,9 +612,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isInitialized) return;
 
-    // Auto update checks are intentionally disabled.
-    if (!AUTO_UPDATE_ENABLED) return;
-
     // Enterprise mode: completely skip update detection
     if (enterpriseConfig?.disableUpdate) return;
 
