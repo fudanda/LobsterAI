@@ -4,12 +4,34 @@ import type { SqliteStore } from '../sqliteStore';
 
 let cachedTestMode: boolean | null = null;
 
+const UPDATE_API_BASE_URL_ENV = 'LOBSTERAI_UPDATE_API_BASE_URL';
+
+const UpdateApiEnvironment = {
+  Test: 'test',
+  Prod: 'prod',
+} as const;
+
+type UpdateApiEnvironment = typeof UpdateApiEnvironment[keyof typeof UpdateApiEnvironment];
+
+const UpdateEndpointName = {
+  Auto: 'update',
+  Manual: 'update-manual',
+} as const;
+
+type UpdateEndpointName = typeof UpdateEndpointName[keyof typeof UpdateEndpointName];
+
+type AppConfigStoreValue = {
+  app?: {
+    testMode?: boolean;
+  };
+};
+
 /**
  * Read testMode from store and cache it.
  * Call once at startup and again whenever app_config changes.
  */
 export function refreshEndpointsTestMode(store: SqliteStore): void {
-  const appConfig = store.get<any>('app_config');
+  const appConfig = store.get<AppConfigStoreValue>('app_config');
   cachedTestMode = appConfig?.app?.testMode === true;
 }
 
@@ -31,16 +53,40 @@ export const getServerApiBaseUrl = (): string => {
     : 'https://lobsterai-server.youdao.com';
 };
 
+const getUpdateApiEnvironment = (): UpdateApiEnvironment => (
+  isTestMode() ? UpdateApiEnvironment.Test : UpdateApiEnvironment.Prod
+);
+
+const getUpdateApiOverrideBaseUrl = (): string | null => {
+  const value = process.env[UPDATE_API_BASE_URL_ENV]?.trim();
+  if (!value) {
+    return null;
+  }
+  const normalized = value.replace(/\/+$/, '');
+  console.log(`[UpdateAPI] using override base URL from ${UPDATE_API_BASE_URL_ENV}: ${normalized}`);
+  return normalized;
+};
+
+const getUpdateApiOverrideUrl = (endpointName: UpdateEndpointName): string | null => {
+  const baseUrl = getUpdateApiOverrideBaseUrl();
+  if (!baseUrl) {
+    return null;
+  }
+  return `${baseUrl}/openapi/get/luna/hardware/lobsterai/${getUpdateApiEnvironment()}/${endpointName}`;
+};
+
 export const getUpdateCheckUrl = (): string => (
-  isTestMode()
+  getUpdateApiOverrideUrl(UpdateEndpointName.Auto)
+  ?? (isTestMode()
     ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update'
+    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update')
 );
 
 export const getManualUpdateCheckUrl = (): string => (
-  isTestMode()
+  getUpdateApiOverrideUrl(UpdateEndpointName.Manual)
+  ?? (isTestMode()
     ? 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/test/update-manual'
-    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update-manual'
+    : 'https://api-overmind.youdao.com/openapi/get/luna/hardware/lobsterai/prod/update-manual')
 );
 
 export const getFallbackDownloadUrl = (): string => (
