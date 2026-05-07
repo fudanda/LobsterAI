@@ -4459,7 +4459,7 @@ if (!gotTheLock) {
       }
 
       const devPort = process.env.ELECTRON_START_URL?.match(/:(\d+)/)?.[1] || '5175';
-      const lzClawOrigin = 'https://lz.srmtj.com';
+      const lzClawOrigin = 'https://120.53.3.76:8088';
       const cspDirectives = [
         "default-src 'self'",
         isDev

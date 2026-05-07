@@ -4301,7 +4301,7 @@ const Settings: React.FC<SettingsProps> = ({
             {/* Info Card */}
             <div className="w-full mt-6 overflow-hidden rounded-xl border border-border bg-white">
               <iframe
-                src="https://lz.srmtj.com/lzclaw.html"
+                src="https://120.53.3.76:8088/lzclaw.html"
                 title="LZClaw"
                 loading="lazy"
                 className="block h-[520px] w-full border-0 bg-white"

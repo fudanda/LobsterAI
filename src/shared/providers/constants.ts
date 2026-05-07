@@ -196,12 +196,12 @@ const PROVIDER_DEFINITIONS = [
     label: 'Lzclaw',
     openClawProviderId: OpenClawProviderId.Lzclaw,
     // Must match defaultApiFormat (OpenAI): compat base is /v1, not the site root.
-    defaultBaseUrl: 'https://lz.srmtj.com/v1',
+    defaultBaseUrl: 'https://120.53.3.76:8088/v1',
     defaultApiFormat: ApiFormat.OpenAI,
     codingPlanSupported: false,
     switchableBaseUrls: {
-      anthropic: 'https://lz.srmtj.com',
-      openai: 'https://lz.srmtj.com/v1',
+      anthropic: 'https://120.53.3.76:8088',
+      openai: 'https://120.53.3.76:8088/v1',
     },
     region: 'china',
     enPriority: 0,
