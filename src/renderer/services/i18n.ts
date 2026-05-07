@@ -386,7 +386,6 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkBootstrapSoulTitle: '助手性格',
     coworkBootstrapSoulHint: '助手的性格、语气和行为准则。会强制助手遵循此设定。',
     coworkBootstrapPlaceholder: '支持 Markdown 格式，可用中文或英文书写',
-    coworkBootstrapStoragePath: '存储路径',
     coworkBootstrapSaveFailed: 'Agent 设定保存失败',
     coworkMemoryEnabled: '启用用户记忆',
     coworkMemoryEnabledHint: 'OpenClaw 会自动索引 MEMORY.md 文件，为 Agent 提供长期记忆检索。',
@@ -574,6 +573,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     creating: '创建中...',
 
     coworkNewSession: '新会话',
+    coworkDefaultSessionTitle: '新对话',
     coworkContinuePlaceholder: '继续对话...',
     coworkRemoteManagedPlaceholder: '该会话由 IM 通道创建，请在对应的 IM 平台操作',
     aiGeneratedDisclaimer: '内容由 AI 生成，仅供参考',
@@ -657,6 +657,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorServerError: '服务端出现错误，请稍后重试。',
     coworkErrorSessionStartFailed: '会话启动失败：{error}',
     coworkErrorSessionContinueFailed: '发送消息失败：{error}',
+    coworkModelSwitchFailed: '模型切换失败，请稍后重试。',
     coworkErrorEngineNotReady: 'AI 引擎正在启动中，请稍等几秒后重试。',
     coworkErrorUnknown: '任务执行出错，请重试。如果问题持续出现，请检查模型配置。',
 
@@ -692,6 +693,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
       '请输入 GitHub 链接或 owner/repo 格式，或切换到 ClawHub 标签页导入。',
     importSkill: '导入',
     importingSkill: '导入中...',
+    skillImportSuccess: '技能已添加',
     official: '官方',
     noSkillsAvailable: '暂无可用技能',
     skillsDescription: '为您的智能体提供预封装且可重复的最佳实践与工具',
@@ -1943,7 +1945,6 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkBootstrapSoulHint:
       'Assistant personality, tone, and behavior guidelines. The assistant will be instructed to follow this.',
     coworkBootstrapPlaceholder: 'Supports Markdown. Write in any language.',
-    coworkBootstrapStoragePath: 'Storage path',
     coworkBootstrapSaveFailed: 'Failed to save agent settings',
     coworkMemoryEnabled: 'Enable user memories',
     coworkMemoryEnabledHint:
@@ -2141,6 +2142,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     creating: 'Creating...',
 
     coworkNewSession: 'New Session',
+    coworkDefaultSessionTitle: 'New Chat',
     coworkContinuePlaceholder: 'Continue the conversation...',
     coworkRemoteManagedPlaceholder:
       'This session was created via IM. Please use the corresponding IM platform.',
@@ -2235,6 +2237,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
     coworkErrorServerError: 'Server error occurred. Please try again later.',
     coworkErrorSessionStartFailed: 'Failed to start session: {error}',
     coworkErrorSessionContinueFailed: 'Failed to send message: {error}',
+    coworkModelSwitchFailed: 'Failed to switch model. Please try again later.',
     coworkErrorEngineNotReady: 'AI engine is starting up. Please wait a few seconds and try again.',
     coworkErrorUnknown:
       'Task failed due to an unexpected error. Please retry. If the issue persists, check your model configuration.',
@@ -2273,6 +2276,7 @@ const translations: Record<LanguageType, Record<string, string>> = {
       'Please enter a GitHub URL or owner/repo, or switch to the ClawHub tab.',
     importSkill: 'Import',
     importingSkill: 'Importing...',
+    skillImportSuccess: 'Skill added',
     official: 'Official',
     noSkillsAvailable: 'No skills available',
     skillsDescription: 'Pre-packaged best practices and tools for your AI agent',

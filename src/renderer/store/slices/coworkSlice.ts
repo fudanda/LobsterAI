@@ -243,6 +243,13 @@ const coworkSlice = createSlice({
       }
     },
 
+    updateCurrentSessionModelOverride(state, action: PayloadAction<{ sessionId: string; modelOverride: string }>) {
+      const { sessionId, modelOverride } = action.payload;
+      if (state.currentSession?.id !== sessionId) return;
+      state.currentSession.modelOverride = modelOverride;
+      state.currentSession.updatedAt = Date.now();
+    },
+
     enqueuePendingPermission(state, action: PayloadAction<CoworkPermissionRequest>) {
       const alreadyQueued = state.pendingPermissions.some(
         (permission) => permission.requestId === action.payload.requestId
@@ -322,6 +329,7 @@ export const {
   setRemoteManaged,
   updateSessionPinned,
   updateSessionTitle,
+  updateCurrentSessionModelOverride,
   enqueuePendingPermission,
   dequeuePendingPermission,
   clearPendingPermissions,

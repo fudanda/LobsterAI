@@ -121,6 +121,81 @@ function resolveWindowsRegistryPath(): string | null {
   }
 }
 
+function isWindowsDeletePermissionError(error: unknown): boolean {
+  if (process.platform !== 'win32') return false;
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+function tryWindowsDeleteFallbackAsync(targetDir: string): Promise<{ success: boolean; detail?: string }> {
+  if (process.platform !== 'win32') return Promise.resolve({ success: false, detail: 'not-windows' });
+
+  return new Promise<void>(resolve => setTimeout(resolve, 50)).then(() => {
+    const escapedPath = targetDir.replace(/"/g, '""');
+    const command = `icacls "${escapedPath}" /reset /t /c >nul 2>&1 & attrib -r -s -h "${escapedPath}" /s /d >nul 2>&1 & rmdir /s /q "${escapedPath}"`;
+
+    return new Promise<{ success: boolean; detail?: string }>((resolve) => {
+      let settled = false;
+      const settle = (result: { success: boolean; detail?: string }) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', command], {
+        stdio: 'pipe',
+        windowsHide: true,
+      });
+
+      let stderr = '';
+      let stdout = '';
+      child.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
+      child.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf-8'); });
+
+      const timer = setTimeout(() => {
+        child.kill();
+        settle({ success: false, detail: 'timeout' });
+      }, 10000);
+
+      child.on('close', () => {
+        clearTimeout(timer);
+        if (!fs.existsSync(targetDir)) {
+          settle({ success: true });
+        } else {
+          const detail = stderr.trim() || stdout.trim() || 'unknown';
+          settle({ success: false, detail });
+        }
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        settle({ success: false, detail: err.message });
+      });
+    });
+  });
+}
+
+function normalizeWindowsSkillDirectoryAttrs(targetDir: string): { success: boolean; detail?: string } {
+  if (process.platform !== 'win32') return { success: true };
+
+  const escapedPath = targetDir.replace(/"/g, '""');
+  const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `attrib -r -s -h "${escapedPath}" /s /d`], {
+    stdio: 'pipe',
+    windowsHide: true,
+    timeout: 10000,
+  });
+
+  if (result.status === 0) {
+    return { success: true };
+  }
+
+  const stderr = result.stderr?.toString('utf-8').trim();
+  const stdout = result.stdout?.toString('utf-8').trim();
+  const detail = stderr || stdout || result.error?.message || `status=${result.status ?? 'null'}`;
+  return { success: false, detail };
+}
+
 /**
  * Build an environment for spawning skill scripts.
  * Merges the user's shell PATH with the current process environment.
@@ -131,12 +206,19 @@ function buildSkillEnv(): Record<string, string | undefined> {
   // Normalize PATH key casing on Windows to avoid duplicate PATH/Path issues
   normalizePathKey(env);
 
-  if (app.isPackaged) {
-    // Ensure HOME is set (crucial for npm to find its config)
-    if (!env.HOME) {
-      env.HOME = app.getPath('home');
-    }
+  // Ensure HOME is available for tools (e.g. clawhub CLI) that persist state
+  // under the user's home directory. Without this, some runtimes may resolve
+  // to root ("/.clawhub") in packaged apps.
+  if (!env.HOME) {
+    env.HOME = app.getPath('home');
+    console.debug('[skills] HOME was unset; using Electron user home directory');
+  }
+  if (process.platform === 'win32' && !env.USERPROFILE) {
+    env.USERPROFILE = env.HOME;
+    console.debug('[skills] USERPROFILE was unset; aligned with HOME for skill subprocesses');
+  }
 
+  if (app.isPackaged) {
     if (process.platform === 'win32') {
       // On Windows, merge the latest PATH from the registry to pick up
       // tools installed after the Electron app (or Explorer) was started.
@@ -917,13 +999,17 @@ const downloadClawhubSkill = async (
   targetDir: string,
   env: NodeJS.ProcessEnv
 ): Promise<void> => {
+  fs.mkdirSync(targetDir, { recursive: true });
   const npxCliJs = resolveNpxCliJs();
   const electronPath = getElectronNodeRuntimePath();
 
   let command: string;
   let args: string[];
   if (npxCliJs) {
-    console.log(`[downloadClawhubSkill] using bundled npx: electron="${electronPath}", npxCliJs="${npxCliJs}"`);
+    console.log(
+      `[downloadClawhubSkill] cwd="${targetDir}" skill="${skillName}" `
+      + `electron="${electronPath}" npxCliJs="${npxCliJs}"`,
+    );
     command = electronPath;
     args = [npxCliJs, 'clawhub@latest', 'install', skillName, '--dir', targetDir, '--no-input', '--force'];
     // Inject --require script to hide CMD windows from all descendant processes
@@ -933,7 +1019,10 @@ const downloadClawhubSkill = async (
     }
   } else {
     const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    console.log(`[downloadClawhubSkill] bundled npx not found, falling back to system "${npxCommand}"`);
+    console.log(
+      `[downloadClawhubSkill] cwd="${targetDir}" skill="${skillName}" `
+      + `bundled npx not found, falling back to system "${npxCommand}"`,
+    );
     if (!hasCommand(npxCommand, env)) {
       throw new Error('npx is not available. Please install Node.js from https://nodejs.org/');
     }
@@ -943,6 +1032,7 @@ const downloadClawhubSkill = async (
 
   try {
     await runCommand(command, args, {
+      cwd: targetDir,
       env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
     });
   } catch (error) {
@@ -1234,6 +1324,7 @@ export class SkillManager {
     existingSkillDir?: string;
   }>();
   private upgradingSkillIds = new Set<string>();
+  private deletingSkillIds = new Set<string>();
 
   constructor(private getStore: () => SqliteStore) {}
 
@@ -1530,7 +1621,7 @@ export class SkillManager {
     return this.listSkills();
   }
 
-  deleteSkill(id: string): SkillRecord[] {
+  async deleteSkill(id: string): Promise<SkillRecord[]> {
     const root = this.ensureSkillsRoot();
     if (id !== path.basename(id)) {
       throw new Error('Invalid skill id');
@@ -1538,6 +1629,19 @@ export class SkillManager {
     if (this.isBuiltInSkillId(id)) {
       throw new Error('Built-in skills cannot be deleted');
     }
+    if (this.deletingSkillIds.has(id)) {
+      throw new Error(`Skill "${id}" is already being deleted`);
+    }
+
+    this.deletingSkillIds.add(id);
+    try {
+      return await this._performDelete(id, root);
+    } finally {
+      this.deletingSkillIds.delete(id);
+    }
+  }
+
+  private async _performDelete(id: string, root: string): Promise<SkillRecord[]> {
 
     let targetDir: string | null = resolveWithin(root, id);
     if (!fs.existsSync(targetDir)) {
@@ -1555,16 +1659,54 @@ export class SkillManager {
     // Release directory handles held by fs.watch() before deleting;
     // on Windows, open handles prevent rmSync from removing the directory.
     this.stopWatching();
+    // On Windows, watcher.close() triggers an async kernel operation to release
+    // the directory handle. Yield to the event loop so the handle is fully
+    // released before we attempt deletion.
+    if (process.platform === 'win32') {
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    }
     try {
       if (targetDir !== null) {
+        let removedByFallback = false;
         const startMs = Date.now();
-        fs.rmSync(targetDir, {
-          recursive: true,
-          force: true,
-          maxRetries: process.platform === 'win32' ? 5 : 0,
-          retryDelay: process.platform === 'win32' ? 200 : 0,
-        });
-        console.log('[skills] deleteSkill: directory removed in %dms', Date.now() - startMs);
+        try {
+          await fs.promises.rm(targetDir, {
+            recursive: true,
+            force: true,
+            maxRetries: process.platform === 'win32' ? 5 : 0,
+            retryDelay: process.platform === 'win32' ? 200 : 0,
+          });
+        } catch (error) {
+          if (!isWindowsDeletePermissionError(error)) {
+            throw error;
+          }
+          const fallback = await tryWindowsDeleteFallbackAsync(targetDir);
+          if (!fallback.success) {
+            console.warn('[skills] deleteSkill: Windows fallback failed for "%s": %s', id, fallback.detail || 'unknown');
+            // Last resort: remove SKILL.md so listSkillDirs won't discover this
+            // directory, then rename it to a tombstone cleaned up on next startup.
+            try {
+              const skillMdPath = path.join(targetDir, SKILL_FILE_NAME);
+              if (fs.existsSync(skillMdPath)) {
+                fs.unlinkSync(skillMdPath);
+              }
+              const tombstone = targetDir + '.deleted.' + Date.now();
+              fs.renameSync(targetDir, tombstone);
+              console.warn('[skills] deleteSkill: directory renamed to tombstone "%s" as last resort', path.basename(tombstone));
+              removedByFallback = true;
+            } catch (renameError) {
+              console.error('[skills] deleteSkill: last-resort rename also failed:', renameError);
+              throw error;
+            }
+          } else {
+            removedByFallback = true;
+          }
+        }
+        if (removedByFallback) {
+          console.warn('[skills] deleteSkill: directory removed via Windows fallback in %dms', Date.now() - startMs);
+        } else {
+          console.log('[skills] deleteSkill: directory removed in %dms', Date.now() - startMs);
+        }
       } else {
         console.warn('[skills] deleteSkill: directory not found on disk, cleaning state only');
       }
@@ -1767,6 +1909,12 @@ export class SkillManager {
           suffix += 1;
         }
         cpRecursiveSync(skillDir, targetDir);
+        const normalizeResult = normalizeWindowsSkillDirectoryAttrs(targetDir);
+        if (normalizeResult.success) {
+          console.log('[skills] install normalization applied for "%s" at %s', folderName, targetDir);
+        } else {
+          console.warn('[skills] install normalization failed for "%s" at %s: %s', folderName, targetDir, normalizeResult.detail || 'unknown');
+        }
       }
 
       cleanupPathSafely(cleanupPath);
@@ -2016,6 +2164,12 @@ export class SkillManager {
           suffix += 1;
         }
         cpRecursiveSync(skillDir, targetDir);
+        const normalizeResult = normalizeWindowsSkillDirectoryAttrs(targetDir);
+        if (normalizeResult.success) {
+          console.log('[skills] install normalization applied for "%s" at %s', folderName, targetDir);
+        } else {
+          console.warn('[skills] install normalization failed for "%s" at %s: %s', folderName, targetDir, normalizeResult.detail || 'unknown');
+        }
         installedIds.push(path.basename(targetDir));
       }
     }
@@ -2042,6 +2196,23 @@ export class SkillManager {
     this.stopWatching();
     const primaryRoot = this.ensureSkillsRoot();
     const roots = this.getSkillRoots(primaryRoot);
+
+    // Clean up tombstone directories left by failed deletions on Windows
+    if (process.platform === 'win32') {
+      for (const root of roots) {
+        if (!fs.existsSync(root)) continue;
+        try {
+          for (const entry of fs.readdirSync(root)) {
+            if (/\.deleted\.\d+$/.test(entry)) {
+              try {
+                fs.rmSync(path.join(root, entry), { recursive: true, force: true });
+                console.log('[skills] startWatching: cleaned up tombstone "%s"', entry);
+              } catch { /* will retry next time */ }
+            }
+          }
+        } catch { /* ignore scan errors */ }
+      }
+    }
 
     // Root-level watch: only react to directory additions/removals (new/deleted skills).
     const rootWatchHandler = (_event: string, filename: string | null) => {
@@ -2685,4 +2856,5 @@ export const __skillManagerTestUtils = {
   isTruthy,
   extractDescription,
   parseClawhubUrl,
+  isWindowsDeletePermissionError,
 };

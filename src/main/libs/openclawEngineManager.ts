@@ -8,6 +8,13 @@ import os from 'os';
 import path from 'path';
 
 import { ensureElectronNodeShim, getElectronNodeRuntimePath, getSkillsRoot } from './coworkUtil';
+import {
+  formatGatewayLogDateKey,
+  type GatewayLogEntry,
+  getGatewayLogPath,
+  getRecentGatewayLogEntries,
+  pruneGatewayLogs,
+} from './gatewayLogRotation';
 import { getCodexHomeDir } from './openaiCodexAuth';
 import { cleanupStaleThirdPartyPluginsFromBundledDir, listLocalOpenClawExtensionIds,syncLocalOpenClawExtensionsIntoRuntime } from './openclawLocalExtensions';
 import { appendPythonRuntimeToEnv } from './pythonRuntime';
@@ -155,7 +162,6 @@ export class OpenClawEngineManager extends EventEmitter {
   private readonly stateDir: string;
   private readonly gatewayTokenPath: string;
   private readonly gatewayPortPath: string;
-  private readonly gatewayLogPath: string;
   private readonly configPath: string;
 
   private desiredVersion: string;
@@ -169,6 +175,7 @@ export class OpenClawEngineManager extends EventEmitter {
   private startGatewayPromise: Promise<OpenClawEngineStatus> | null = null;
   private secretEnvVars: Record<string, string> = {};
   private gatewaySpawnedAt: number | null = null;
+  private gatewayLogPrunedDateKey: string | null = null;
 
   constructor() {
     super();
@@ -180,12 +187,12 @@ export class OpenClawEngineManager extends EventEmitter {
 
     this.gatewayTokenPath = path.join(this.stateDir, 'gateway-token');
     this.gatewayPortPath = path.join(this.stateDir, 'gateway-port.json');
-    this.gatewayLogPath = path.join(this.logsDir, 'gateway.log');
     this.configPath = path.join(this.stateDir, 'openclaw.json');
 
     ensureDir(this.baseDir);
     ensureDir(this.logsDir);
     ensureDir(this.stateDir);
+    this.pruneGatewayLogsIfNeeded();
 
     const runtime = this.resolveRuntimeMetadata();
     this.desiredVersion = runtime.version || DEFAULT_OPENCLAW_VERSION;
@@ -264,7 +271,18 @@ export class OpenClawEngineManager extends EventEmitter {
   }
 
   getGatewayLogPath(): string {
-    return this.gatewayLogPath;
+    return getGatewayLogPath(this.logsDir);
+  }
+
+  getRecentGatewayLogEntries(): GatewayLogEntry[] {
+    return getRecentGatewayLogEntries(this.logsDir);
+  }
+
+  private pruneGatewayLogsIfNeeded(now = new Date()): void {
+    const dateKey = formatGatewayLogDateKey(now);
+    if (this.gatewayLogPrunedDateKey === dateKey) return;
+    pruneGatewayLogs(this.logsDir, now);
+    this.gatewayLogPrunedDateKey = dateKey;
   }
 
   /**
@@ -1372,11 +1390,13 @@ export class OpenClawEngineManager extends EventEmitter {
   }
 
   private attachGatewayProcessLogs(child: GatewayProcess): void {
-    ensureDir(path.dirname(this.gatewayLogPath));
+    ensureDir(this.logsDir);
+    this.pruneGatewayLogsIfNeeded();
     const appendLog = (chunk: Buffer | string, stream: 'stdout' | 'stderr') => {
+      this.pruneGatewayLogsIfNeeded();
       const text = typeof chunk === 'string' ? chunk : chunk.toString();
       const line = `[${new Date().toISOString()}] [${stream}] ${text}`;
-      fs.appendFile(this.gatewayLogPath, line, () => {
+      fs.appendFile(this.getGatewayLogPath(), line, () => {
         // best-effort log append
       });
     };
@@ -1439,8 +1459,8 @@ export class OpenClawEngineManager extends EventEmitter {
       if (this.shutdownRequested) return;
 
       try {
-        const tail = fs.readFileSync(this.gatewayLogPath, 'utf8').split('\n').slice(-30).join('\n');
-        console.error(`${gwDiagTs()} gateway.log tail (last 30 lines before crash):\n${tail}`);
+        const tail = fs.readFileSync(this.getGatewayLogPath(), 'utf8').split('\n').slice(-30).join('\n');
+        console.error(`${gwDiagTs()} gateway log tail (last 30 lines before crash):\n${tail}`);
       } catch { /* log file may not exist */ }
 
       this.setStatus({

@@ -17,6 +17,15 @@ vi.mock('electron', () => ({
 const mockRuntimeState = vi.hoisted(() => ({
   proxyPort: null as number | null,
   serverModels: [] as Array<{ modelId: string; supportsImage?: boolean }>,
+  enabledProviders: [] as Array<{
+    providerName: string;
+    baseURL: string;
+    apiKey: string;
+    apiType: 'anthropic' | 'openai';
+    authType?: 'apikey' | 'oauth';
+    codingPlanEnabled: boolean;
+    models: Array<{ id: string; name: string; supportsImage?: boolean }>;
+  }>,
   rawApiConfig: {
     config: {
       baseURL: 'https://api.openai.com/v1',
@@ -35,7 +44,7 @@ const mockRuntimeState = vi.hoisted(() => ({
 
 vi.mock('./claudeSettings', () => ({
   getAllServerModelMetadata: () => mockRuntimeState.serverModels,
-  resolveAllEnabledProviderConfigs: () => [],
+  resolveAllEnabledProviderConfigs: () => mockRuntimeState.enabledProviders,
   resolveAllProviderApiKeys: () => ({}),
   resolveRawApiConfig: () => mockRuntimeState.rawApiConfig,
 }));
@@ -69,6 +78,7 @@ describe('OpenClawConfigSync runtime config output', () => {
   beforeEach(() => {
     mockRuntimeState.proxyPort = null;
     mockRuntimeState.serverModels = [];
+    mockRuntimeState.enabledProviders = [];
     mockRuntimeState.rawApiConfig = {
       config: {
         baseURL: 'https://api.openai.com/v1',
@@ -127,7 +137,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -141,6 +151,94 @@ describe('OpenClawConfigSync runtime config output', () => {
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     expect(config.models.providers.openai.request.proxy).toEqual({ mode: 'env-proxy' });
+  });
+
+  test('does not create an agent model allowlist for OpenAI OAuth when system proxy is enabled', async () => {
+    const { ProviderName } = await import('../../shared/providers');
+    const { setSystemProxyEnabled } = await import('./systemProxy');
+    setSystemProxyEnabled(true);
+    mockRuntimeState.rawApiConfig = {
+      config: {
+        baseURL: 'https://api.openai.com/v1',
+        apiKey: '',
+        model: 'gpt-5.4',
+        apiType: 'openai',
+      },
+      providerMetadata: {
+        providerName: ProviderName.OpenAI,
+        authType: 'oauth',
+        codingPlanEnabled: false,
+        supportsImage: true,
+        modelName: 'GPT-5.4',
+      },
+    };
+    mockRuntimeState.enabledProviders = [
+      {
+        providerName: ProviderName.OpenAI,
+        baseURL: 'https://api.openai.com/v1',
+        apiKey: '',
+        apiType: 'openai',
+        authType: 'oauth',
+        codingPlanEnabled: false,
+        models: [{ id: 'gpt-5.4', name: 'GPT-5.4', supportsImage: true }],
+      },
+      {
+        providerName: ProviderName.DeepSeek,
+        baseURL: 'https://api.deepseek.com',
+        apiKey: 'sk-deepseek',
+        apiType: 'openai',
+        codingPlanEnabled: false,
+        models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', supportsImage: false }],
+      },
+    ];
+
+    const { OpenClawConfigSync } = await import('./openclawConfigSync');
+
+    const sync = new OpenClawConfigSync({
+      engineManager: {
+        getConfigPath: () => configPath,
+        getGatewayToken: () => 'gateway-token',
+        getStateDir: () => stateDir,
+        getBaseDir: () => tmpDir,
+      } as never,
+      getCoworkConfig: () => ({
+        workingDirectory: tmpDir,
+        systemPrompt: '',
+        executionMode: 'local',
+        agentEngine: 'openclaw',
+        memoryEnabled: false,
+        memoryImplicitUpdateEnabled: false,
+        memoryLlmJudgeEnabled: false,
+        memoryGuardLevel: 'balanced',
+        memoryUserMemoriesMaxItems: 100,
+        skipMissedJobs: false,
+      }),
+      isEnterprise: () => false,
+      getTelegramInstances: () => [],
+      getDiscordOpenClawConfig: () => null,
+      getDingTalkInstances: () => [],
+      getFeishuInstances: () => [],
+      getQQInstances: () => [],
+      getWecomConfig: () => null,
+      getWecomInstances: () => [],
+      getPopoInstances: () => [],
+      getNimConfig: () => null,
+      getNeteaseBeeChanConfig: () => null,
+      getWeixinConfig: () => null,
+      getIMSettings: () => null,
+      getSkillsList: () => [],
+      getAgents: () => [],
+    });
+
+    const result = sync.sync('openai-oauth-system-proxy');
+    expect(result.ok).toBe(true);
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.models.providers['openai-codex']).toBeDefined();
+    expect(config.models.providers.deepseek).toBeDefined();
+    expect(config.agents.defaults.models).toBeUndefined();
+    expect(config.agents.defaults.workspace).toBe(path.join(stateDir, 'workspace-main'));
+    expect(config.agents.defaults.cwd).toBe(path.resolve(tmpDir));
   });
 
   test('merges all server models into existing lobsterai provider and updates image input', async () => {
@@ -194,7 +292,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -315,7 +413,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -400,7 +498,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -463,7 +561,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -567,7 +665,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       }],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => null,
@@ -625,7 +723,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getEmailOpenClawConfig: () => ({
         instances: [{
           instanceId: 'email-work',
@@ -692,7 +790,7 @@ describe('OpenClawConfigSync runtime config output', () => {
       getQQInstances: () => [],
       getWecomConfig: () => null,
       getWecomInstances: () => [],
-      getPopoConfig: () => null,
+      getPopoInstances: () => [],
       getNimConfig: () => null,
       getNeteaseBeeChanConfig: () => null,
       getWeixinConfig: () => ({

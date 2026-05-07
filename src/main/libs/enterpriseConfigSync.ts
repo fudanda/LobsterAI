@@ -1,8 +1,10 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import type { SqliteStore } from '../sqliteStore';
+
 import type { IMStore } from '../im/imStore';
+import type { PopoInstanceConfig } from '../im/types';
+import type { SqliteStore } from '../sqliteStore';
 
 export type EnterpriseUIAction = 'hide' | 'disable' | 'readonly';
 
@@ -692,13 +694,22 @@ function syncIMChannels(configPath: string, imStore: IMStore): void {
         const normalizedCfg = normalizeMultiAccountChannelConfig('moltbot-popo', cfg);
         const accounts = readAccountsFromChannelConfig(normalizedCfg);
         if (accounts) {
-          const firstAccount = Object.values(accounts)[0];
-          if (firstAccount) {
-            imStore.setPopoConfig(firstAccount);
-            return;
-          }
+          const instances = Object.entries(accounts).map(([accountId, accountCfg], idx) => ({
+            ...accountCfg,
+            instanceId: accountId,
+            instanceName: (accountCfg as Record<string, unknown>).name as string || `POPO Bot ${idx + 1}`,
+          })) as PopoInstanceConfig[];
+          imStore.setPopoMultiInstanceConfig({ instances });
+          return;
         }
-        imStore.setPopoConfig(cfg);
+        // Legacy single-account format: wrap as first instance
+        const { randomUUID } = require('crypto') as typeof import('crypto');
+        const instanceId = randomUUID();
+        imStore.setPopoInstanceConfig(instanceId, {
+          ...cfg,
+          instanceId,
+          instanceName: 'POPO Bot 1',
+        });
       },
       'nim': (cfg) => {
         if (cfg && typeof cfg.accounts === 'object' && !Array.isArray(cfg.accounts)) {
@@ -741,7 +752,7 @@ function syncCoworkConfig(
   try {
     const raw = fs.readFileSync(openclawPath, 'utf-8');
     const config = JSON.parse(raw) as Record<string, unknown>;
-    const agents = config.agents as { defaults?: { sandbox?: { mode?: string }; workspace?: string } } | undefined;
+    const agents = config.agents as { defaults?: { sandbox?: { mode?: string }; workspace?: string; cwd?: string } } | undefined;
     const updates: Record<string, string> = {};
 
     updates.agentEngine = 'openclaw';
@@ -753,8 +764,8 @@ function syncCoworkConfig(
       }
     }
 
-    if (agents?.defaults?.workspace) {
-      updates.workingDirectory = agents.defaults.workspace;
+    if (agents?.defaults?.cwd) {
+      updates.workingDirectory = agents.defaults.cwd;
     }
 
     setConfig(updates);

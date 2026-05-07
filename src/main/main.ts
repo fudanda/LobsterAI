@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 
 import type { OpenClawSessionPatch } from '../common/openclawSession';
+import { buildSessionTitleFromInput } from '../common/sessionTitle';
 import { buildScheduledTaskEnginePrompt } from '../scheduledTask/enginePrompt';
 import { migrateScheduledTaskRunsToOpenclaw, migrateScheduledTasksToOpenclaw } from '../scheduledTask/migrate';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
@@ -67,16 +68,17 @@ import {
   addMemoryEntry,
   deleteMemoryEntry,
   ensureDefaultIdentity,
+  getMainAgentWorkspacePath,
   migrateSqliteToMemoryMd,
   readBootstrapFile,
   readMemoryEntries,
   resolveMemoryFilePath,
   searchMemoryEntries,
-  syncMemoryFileOnWorkspaceChange,
   updateMemoryEntry,
   writeBootstrapFile,
 } from './libs/openclawMemoryFile';
 import { startOpenClawTokenProxy, stopOpenClawTokenProxy } from './libs/openclawTokenProxy';
+import { migrateMainAgentWorkspace } from './libs/openclawWorkspaceMigration';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import { serializeForLog } from './libs/sanitizeForLog';
 import { SqliteBackupManager } from './libs/sqliteBackup/sqliteBackupManager';
@@ -901,9 +903,9 @@ const bootstrapOpenClawEngine = async (options: { forceReinstall?: boolean; reas
       console.log(`[OpenClaw] bootstrap: MCP bridge setup done (${elapsed()}), result=${bridgeResult ? `${bridgeResult.tools.length} tools` : 'null'}`);
       console.log(`[OpenClaw] bootstrap: mcpBridgeServer=${mcpBridgeServer?.callbackUrl || 'null'}, mcpServerManager.tools=${mcpServerManager?.toolManifest?.length ?? 'null'}, secret=${mcpBridgeSecret ? 'set' : 'null'}`);
 
-      // Ensure IDENTITY.md has default content in the current workspace
+      // Ensure IDENTITY.md has default content in the main agent workspace
       try {
-        ensureDefaultIdentity(getCoworkStore().getConfig().workingDirectory);
+        ensureDefaultIdentity(getMainAgentWorkspacePath(manager.getStateDir()));
       } catch (err) {
         console.warn('[OpenClaw] bootstrap: ensureDefaultIdentity failed (non-fatal):', err);
       }
@@ -1037,7 +1039,7 @@ const shouldRefreshServerQuotaForSession = (sessionId: string): boolean => {
 };
 
 const resolveCoworkAgentEngine = (): CoworkAgentEngine => {
-  return getCoworkStore().getConfig().agentEngine;
+  return 'openclaw';
 };
 
 const getOpenClawConfigSync = (): OpenClawConfigSync => {
@@ -1083,11 +1085,11 @@ const getOpenClawConfigSync = (): OpenClawConfigSync => {
           return [];
         }
       },
-      getPopoConfig: () => {
+      getPopoInstances: () => {
         try {
-          return getIMGatewayManager().getConfig().popo;
+          return getIMGatewayManager().getIMStore().getPopoInstances();
           } catch {
-          return null;
+          return [];
         }
       },
       getEmailOpenClawConfig: () => {
@@ -1644,15 +1646,11 @@ const getIMGatewayManager = () => {
         coworkRuntime: runtime,
         coworkStore: store,
         ensureCoworkReady: async () => {
-          if (resolveCoworkAgentEngine() !== 'openclaw') {
-            return;
-          }
           const status = await ensureOpenClawRunningForCowork();
           if (status.phase !== 'running') {
             throw new Error(status.message || 'AI engine is initializing. Please try again in a moment.');
           }
         },
-        isOpenClawEngine: () => resolveCoworkAgentEngine() === 'openclaw',
         syncOpenClawConfig: async (reason?: string) => {
           await syncOpenClawConfig({
             reason: reason || 'im-gateway-sync',
@@ -1803,11 +1801,10 @@ const getIMGatewayManager = () => {
 };
 
 function mergeCoworkSystemPrompt(
-  engine: CoworkAgentEngine,
   systemPrompt?: string,
 ): string | undefined {
   const sections = [
-    buildScheduledTaskEnginePrompt(engine),
+    buildScheduledTaskEnginePrompt(),
     systemPrompt?.trim() || '',
   ].filter(Boolean);
   return sections.length > 0 ? sections.join('\n\n') : undefined;
@@ -2111,7 +2108,7 @@ if (!gotTheLock) {
         entries: [
           ...getRecentMainLogEntries(),
           { archiveName: 'cowork.log', filePath: getCoworkLogPath() },
-          { archiveName: 'gateway.log', filePath: manager.getGatewayLogPath() },
+          ...manager.getRecentGatewayLogEntries(),
           ...getRecentOpenClawDailyLogEntries(manager.getOpenClawDailyLogDir()),
           ...(process.platform === 'win32'
             ? [{ archiveName: 'install-timing.log', filePath: path.join(app.getPath('appData'), 'LobsterAI', 'install-timing.log') }]
@@ -2503,9 +2500,9 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('skills:delete', (_event, id: string) => {
+  ipcMain.handle('skills:delete', async (_event, id: string) => {
     try {
-      const skills = getSkillManager().deleteSkill(id);
+      const skills = await getSkillManager().deleteSkill(id);
       return { success: true, skills };
     } catch (error) {
       console.error('[skills] Failed to delete skill:', id, error);
@@ -2805,18 +2802,14 @@ if (!gotTheLock) {
     modelOverride?: string;
   }) => {
     try {
-      const activeEngine = resolveCoworkAgentEngine();
-      if (activeEngine === 'openclaw') {
-        const engineStatus = await ensureOpenClawRunningForCowork();
-        if (engineStatus.phase !== 'running') {
-          return getEngineNotReadyResponse(engineStatus);
-        }
+      const engineStatus = await ensureOpenClawRunningForCowork();
+      if (engineStatus.phase !== 'running') {
+        return getEngineNotReadyResponse(engineStatus);
       }
 
       const coworkStoreInstance = getCoworkStore();
       const config = coworkStoreInstance.getConfig();
       const systemPrompt = mergeCoworkSystemPrompt(
-        activeEngine,
         options.systemPrompt ?? config.systemPrompt,
       );
       const selectedWorkspaceRoot = (options.cwd || config.workingDirectory || '').trim();
@@ -2828,8 +2821,10 @@ if (!gotTheLock) {
         };
       }
 
-      // Generate title from first line of prompt
-      const fallbackTitle = options.prompt.split('\n')[0].slice(0, 50) || 'New Session';
+      const fallbackTitle = buildSessionTitleFromInput(
+        options.prompt,
+        t('coworkDefaultSessionTitle')
+      );
       const title = options.title?.trim() || fallbackTitle;
       const taskWorkingDirectory = resolveTaskWorkingDirectory(selectedWorkspaceRoot);
 
@@ -2927,12 +2922,9 @@ if (!gotTheLock) {
     imageAttachments?: Array<{ name: string; mimeType: string; base64Data: string }>;
   }) => {
     try {
-      const activeEngine = resolveCoworkAgentEngine();
-      if (activeEngine === 'openclaw') {
-        const engineStatus = await ensureOpenClawRunningForCowork();
-        if (engineStatus.phase !== 'running') {
-          return getEngineNotReadyResponse(engineStatus);
-        }
+      const engineStatus = await ensureOpenClawRunningForCowork();
+      if (engineStatus.phase !== 'running') {
+        return getEngineNotReadyResponse(engineStatus);
       }
 
       const runtime = getCoworkEngineRouter();
@@ -2950,7 +2942,6 @@ if (!gotTheLock) {
       }
       runtime.continueSession(options.sessionId, options.prompt, {
         systemPrompt: mergeCoworkSystemPrompt(
-          activeEngine,
           options.systemPrompt ?? existingSession?.systemPrompt,
         ),
         skillIds: options.activeSkillIds,
@@ -3476,8 +3467,7 @@ if (!gotTheLock) {
     offset?: number;
   }) => {
     try {
-      const config = getCoworkStore().getConfig();
-      const filePath = resolveMemoryFilePath(config.workingDirectory);
+      const filePath = resolveMemoryFilePath(getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()));
 
       // Lazy migration: SQLite → MEMORY.md (one-time, cached in memory)
       if (!memoryMigrationDone) {
@@ -3514,8 +3504,7 @@ if (!gotTheLock) {
     isExplicit?: boolean;
   }) => {
     try {
-      const config = getCoworkStore().getConfig();
-      const filePath = resolveMemoryFilePath(config.workingDirectory);
+      const filePath = resolveMemoryFilePath(getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()));
       const entry = addMemoryEntry(filePath, input.text);
       return { success: true, entry };
     } catch (error) {
@@ -3533,8 +3522,7 @@ if (!gotTheLock) {
     isExplicit?: boolean;
   }) => {
     try {
-      const config = getCoworkStore().getConfig();
-      const filePath = resolveMemoryFilePath(config.workingDirectory);
+      const filePath = resolveMemoryFilePath(getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()));
       if (!input.text) {
         return { success: false, error: 'Memory text is required' };
       }
@@ -3554,8 +3542,7 @@ if (!gotTheLock) {
     id: string;
   }) => {
     try {
-      const config = getCoworkStore().getConfig();
-      const filePath = resolveMemoryFilePath(config.workingDirectory);
+      const filePath = resolveMemoryFilePath(getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()));
       const success = deleteMemoryEntry(filePath, input.id);
       return success
         ? { success: true }
@@ -3569,8 +3556,7 @@ if (!gotTheLock) {
   });
   ipcMain.handle('cowork:memory:getStats', async () => {
     try {
-      const config = getCoworkStore().getConfig();
-      const filePath = resolveMemoryFilePath(config.workingDirectory);
+      const filePath = resolveMemoryFilePath(getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir()));
       const entries = readMemoryEntries(filePath);
       return {
         success: true,
@@ -3592,8 +3578,8 @@ if (!gotTheLock) {
   });
   ipcMain.handle('cowork:bootstrap:read', async (_event, filename: string) => {
     try {
-      const config = getCoworkStore().getConfig();
-      const content = readBootstrapFile(config.workingDirectory, filename);
+      const mainWorkspace = getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir());
+      const content = readBootstrapFile(mainWorkspace, filename);
       return { success: true, content };
     } catch (error) {
       return {
@@ -3605,8 +3591,8 @@ if (!gotTheLock) {
   });
   ipcMain.handle('cowork:bootstrap:write', async (_event, filename: string, content: string) => {
     try {
-      const config = getCoworkStore().getConfig();
-      writeBootstrapFile(config.workingDirectory, filename, content);
+      const mainWorkspace = getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir());
+      writeBootstrapFile(mainWorkspace, filename, content);
       return { success: true };
     } catch (error) {
       return {
@@ -3715,30 +3701,17 @@ if (!gotTheLock) {
       getCoworkStore().setConfig(normalizedConfig);
       if (normalizedConfig.workingDirectory !== undefined && normalizedConfig.workingDirectory !== previousWorkingDir) {
         getSkillManager().handleWorkingDirectoryChange();
-        // Sync MEMORY.md to new workspace directory
-        const syncResult = syncMemoryFileOnWorkspaceChange(previousWorkingDir, normalizedConfig.workingDirectory);
-        if (syncResult.error) {
-          console.warn('[OpenClaw Memory] Workspace sync failed:', syncResult.error);
-        }
-        // Ensure IDENTITY.md has default content in the new workspace
-        try {
-          ensureDefaultIdentity(normalizedConfig.workingDirectory);
-        } catch (err) {
-          console.warn('[OpenClaw] ensureDefaultIdentity failed (non-fatal):', err);
-        }
+        // Main agent workspace is decoupled from workingDirectory — no MEMORY.md
+        // or IDENTITY.md sync needed here. The workspace is always at
+        // {STATE_DIR}/workspace-main/ regardless of the user's working directory.
       }
 
       const nextConfig = getCoworkStore().getConfig();
-      if (normalizedAgentEngine !== undefined && normalizedAgentEngine !== previousConfig.agentEngine) {
-        getCoworkEngineRouter().handleEngineConfigChanged(normalizedAgentEngine);
-      }
-      const switchedToOpenClaw = normalizedAgentEngine === 'openclaw'
-        && previousConfig.agentEngine !== 'openclaw';
 
       const shouldSyncOpenClawConfig = normalizedExecutionMode !== undefined
         || normalizedAgentEngine !== undefined
-        || Object.values(normalizedEmbedding).some(v => v !== undefined)
-        || (normalizedConfig.workingDirectory !== undefined && normalizedConfig.workingDirectory !== previousWorkingDir);
+        || normalizedConfig.workingDirectory !== undefined
+        || Object.values(normalizedEmbedding).some(v => v !== undefined);
       if (shouldSyncOpenClawConfig) {
         const syncResult = await syncOpenClawConfig({
           reason: 'cowork-config-change',
@@ -3753,11 +3726,6 @@ if (!gotTheLock) {
         }
       }
 
-      if (switchedToOpenClaw) {
-        void ensureOpenClawRunningForCowork().catch((error) => {
-          console.error('[OpenClaw] Failed to auto-start gateway after engine switch:', error);
-        });
-      }
       return { success: true };
     } catch (error) {
       return {
@@ -4030,6 +3998,55 @@ if (!gotTheLock) {
     }
   });
 
+  ipcMain.handle('im:popo:instance:add', async (_event, name: string) => {
+    try {
+      const instanceId = crypto.randomUUID();
+      const { DEFAULT_POPO_CONFIG: defaults } = await import('./im/types');
+      const instance = {
+        ...defaults,
+        instanceId,
+        instanceName: name || 'POPO Bot',
+      };
+      getIMGatewayManager().getIMStore().setPopoInstanceConfig(instanceId, instance);
+      return { success: true, instance };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to add POPO instance',
+      };
+    }
+  });
+
+  ipcMain.handle('im:popo:instance:delete', async (_event, instanceId: string) => {
+    try {
+      getIMGatewayManager().getIMStore().deletePopoInstance(instanceId);
+      if (getOpenClawEngineManager().getStatus().phase === 'running') {
+        scheduleImConfigSync();
+      }
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete POPO instance',
+      };
+    }
+  });
+
+  ipcMain.handle('im:popo:instance:config:set', async (_event, instanceId: string, config: Record<string, unknown>, options?: { syncGateway?: boolean }) => {
+    try {
+      getIMGatewayManager().getIMStore().setPopoInstanceConfig(instanceId, config);
+      if (options?.syncGateway && getOpenClawEngineManager().getStatus().phase === 'running') {
+        scheduleImConfigSync();
+      }
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to set POPO instance config',
+      };
+    }
+  });
+
   ipcMain.handle('im:status:get', async () => {
     try {
       const status = getIMGatewayManager().getStatus();
@@ -4079,7 +4096,7 @@ if (!gotTheLock) {
 
       if (instance.transport === 'imap') {
         // Test IMAP connection using node-imap
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic require with no type definitions
+         
         let Imap: new (config: Record<string, unknown>) => any;
         try {
           Imap = require('imap');
@@ -4729,7 +4746,7 @@ if (!gotTheLock) {
   });
 
   ipcMain.handle('generate-session-title', async (_event, userInput: string | null) => {
-    return generateSessionTitle(userInput);
+    return generateSessionTitle(userInput, t('coworkDefaultSessionTitle'));
   });
 
   ipcMain.handle('get-recent-cwds', async (_event, limit?: number) => {
@@ -5842,6 +5859,19 @@ if (!gotTheLock) {
       );
     }
 
+    // One-time migration: move main agent workspace files from the user's
+    // working directory to the fixed {STATE_DIR}/workspace-main/ path.
+    try {
+      const engineManager = getOpenClawEngineManager();
+      migrateMainAgentWorkspace(
+        engineManager.getStateDir(),
+        getCoworkStore().getConfig().workingDirectory,
+        getStore(),
+      );
+    } catch (err) {
+      console.warn('[OpenClaw] main agent workspace migration failed (non-fatal):', err);
+    }
+
     // Start proxy BEFORE config sync so proxy-dependent providers (e.g. copilot)
     // get the correct baseURL on the first write, avoiding a mid-startup config
     // overwrite that triggers unnecessary gateway hot-reload.
@@ -5865,18 +5895,16 @@ if (!gotTheLock) {
       console.error('[OpenClaw] Startup config sync failed:', startupSync.error);
     }
     profiler.measure('syncOpenClawConfig');
-    if (resolveCoworkAgentEngine() === 'openclaw') {
-      void ensureOpenClawRunningForCowork().then(() => {
-        // Start cron polling once the gateway is confirmed running.
-        try {
-          getCronJobService().startPolling();
-        } catch (err) {
-          console.warn('[Main] CronJobService not available after OpenClaw startup:', err);
-        }
-      }).catch((error) => {
-        console.error('[OpenClaw] Failed to auto-start gateway on app startup:', error);
-      });
-    }
+    void ensureOpenClawRunningForCowork().then(() => {
+      // Start cron polling once the gateway is confirmed running.
+      try {
+        getCronJobService().startPolling();
+      } catch (err) {
+        console.warn('[Main] CronJobService not available after OpenClaw startup:', err);
+      }
+    }).catch((error) => {
+      console.error('[OpenClaw] Failed to auto-start gateway on app startup:', error);
+    });
 
     // ── Step 1: Show window ASAP ──────────────────────────────────────
     // CSP + createWindow moved before skill initialisation so the user

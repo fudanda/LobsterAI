@@ -11,7 +11,14 @@ import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
 import { RootState } from '../../store';
 import { selectDraftPrompts } from '../../store/selectors/coworkSelectors';
-import { addDraftAttachment, clearDraftAttachments, type DraftAttachment, setDraftAttachments, setDraftPrompt } from '../../store/slices/coworkSlice';
+import {
+  addDraftAttachment,
+  clearDraftAttachments,
+  type DraftAttachment,
+  setDraftAttachments,
+  setDraftPrompt,
+  updateCurrentSessionModelOverride,
+} from '../../store/slices/coworkSlice';
 import type { Model } from '../../store/slices/modelSlice';
 import { setSelectedModel } from '../../store/slices/modelSlice';
 import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
@@ -151,11 +158,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [isAddingFile, setIsAddingFile] = useState(false);
     const [imageVisionHint, setImageVisionHint] = useState(false);
+    const [isPatchingModel, setIsPatchingModel] = useState(false);
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const folderButtonRef = useRef<HTMLButtonElement>(null);
     const dragDepthRef = useRef(0);
     const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const modelPatchRequestIdRef = useRef(0);
 
   // 暴露方法给父组件
   React.useImperativeHandle(ref, () => ({
@@ -198,10 +207,6 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     fallbackModel: currentAgentSelectedModel,
     engine: coworkAgentEngine,
   });
-
-  if (sessionId && currentSession) {
-    console.log('[CoworkPromptInput] model resolve:', { sessionId, currentSessionId: currentSession.id, modelOverride: currentSession.modelOverride, resolvedName: agentSelectedModel?.name, resolvedProvider: agentSelectedModel?.providerKey, resolvedIsServer: agentSelectedModel?.isServerModel });
-  }
 
   const isLarge = size === 'large';
   const minHeight = isLarge ? 60 : 24;
@@ -268,6 +273,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     }
   }, [workingDirectory]);
 
+  useEffect(() => {
+    modelPatchRequestIdRef.current += 1;
+    setIsPatchingModel(false);
+  }, [sessionId]);
+
   // Sync value from draft when sessionId changes
   useEffect(() => {
     setValue(draftPrompt);
@@ -298,7 +308,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     }
 
     const trimmedValue = value.trim();
-    if ((!trimmedValue && attachments.length === 0) || isStreaming || disabled) return;
+    if ((!trimmedValue && attachments.length === 0) || isStreaming || disabled || isPatchingModel) return;
     setShowFolderRequiredWarning(false);
 
     // Get active skills prompts and combine them
@@ -385,7 +395,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     dispatch(setDraftPrompt({ sessionId: draftKey, draft: '' }));
     dispatch(clearDraftAttachments(draftKey));
     setImageVisionHint(false);
-  }, [value, isStreaming, disabled, onSubmit, activeSkillIds, skills, attachments, showFolderSelector, workingDirectory, dispatch, draftKey, effectiveSelectedModel?.id, modelSupportsImage]);
+  }, [value, isStreaming, disabled, isPatchingModel, onSubmit, activeSkillIds, skills, attachments, showFolderSelector, workingDirectory, dispatch, draftKey, effectiveSelectedModel?.id, modelSupportsImage]);
 
   const handleSelectSkill = useCallback((skill: Skill) => {
     dispatch(toggleActiveSkill(skill.id));
@@ -428,7 +438,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
         break;
     }
 
-    if (isSendCombo && !isStreaming && !disabled) {
+    if (isSendCombo && !isStreaming && !disabled && !isPatchingModel) {
       event.preventDefault();
       handleSubmit();
     } else {
@@ -755,7 +765,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     void handleIncomingFiles(files);
   }, [disabled, handleIncomingFiles, isStreaming]);
 
-  const canSubmit = !disabled && !agentModelIsInvalid && (!!value.trim() || attachments.length > 0);
+  const canSubmit = !disabled && !isPatchingModel && !agentModelIsInvalid && (!!value.trim() || attachments.length > 0);
   const enhancedContainerClass = isDraggingFiles
     ? `${containerClass} ring-2 ring-primary/50 border-primary/60`
     : containerClass;
@@ -925,31 +935,64 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                   <div className="flex flex-col items-start gap-1">
                     <ModelSelector
                       dropdownDirection="up"
-                      value={coworkAgentEngine === 'openclaw'
-                        ? (agentModelIsInvalid && currentSession?.modelOverride
-                          ? { id: '__invalid__', name: currentSession.modelOverride.split('/').pop() || currentSession.modelOverride } as Model
-                          : agentSelectedModel)
-                        : null}
-                      onChange={coworkAgentEngine === 'openclaw'
-                        ? async (nextModel) => {
-                            if (!nextModel) return;
-                            const modelRef = toOpenClawModelRef(nextModel);
-                            console.log('[CoworkPromptInput] model selected:', { id: nextModel.id, providerKey: nextModel.providerKey, isServerModel: nextModel.isServerModel, modelRef });
-                            if (sessionId) {
-                              await coworkService.patchSession(sessionId, { model: modelRef });
-                              if (currentAgent && agentModelIsInvalid) {
-                                console.log('[CoworkPromptInput] auto-fixing invalid agent model:', currentAgent.id, currentAgent.model, '->', modelRef);
-                                agentService.updateAgent(currentAgent.id, { model: modelRef });
-                              }
+                      disabled={isPatchingModel}
+                      value={agentModelIsInvalid && currentSession?.modelOverride
+                        ? { id: '__invalid__', name: currentSession.modelOverride.split('/').pop() || currentSession.modelOverride } as Model
+                        : agentSelectedModel}
+                      onChange={async (nextModel) => {
+                        if (isPatchingModel) return;
+                        if (!nextModel) return;
+                        const modelRef = toOpenClawModelRef(nextModel);
+                        if (sessionId) {
+                          const requestId = modelPatchRequestIdRef.current + 1;
+                          modelPatchRequestIdRef.current = requestId;
+                          const previousModelOverride = currentSession?.id === sessionId
+                            ? currentSession.modelOverride
+                            : '';
+
+                          setIsPatchingModel(true);
+                          dispatch(updateCurrentSessionModelOverride({ sessionId, modelOverride: modelRef }));
+
+                          try {
+                            const patchedSession = await coworkService.patchSession(sessionId, { model: modelRef });
+                            if (requestId !== modelPatchRequestIdRef.current) return;
+
+                            if (!patchedSession) {
+                              dispatch(updateCurrentSessionModelOverride({
+                                sessionId,
+                                modelOverride: previousModelOverride,
+                              }));
+                              window.dispatchEvent(new CustomEvent('app:showToast', {
+                                detail: i18nService.t('coworkModelSwitchFailed'),
+                              }));
                               return;
                             }
-                            if (!currentAgent) return;
-                            console.log('[CoworkPromptInput] home page model change (Redux only, no agent update):', { modelRef, modelName: nextModel.name, providerKey: nextModel.providerKey });
-                            dispatch(setSelectedModel({ agentId: currentAgentId, model: nextModel }));
+
+                            if (currentAgent && agentModelIsInvalid) {
+                              void agentService.updateAgent(currentAgent.id, { model: modelRef });
+                            }
+                          } catch {
+                            if (requestId === modelPatchRequestIdRef.current) {
+                              dispatch(updateCurrentSessionModelOverride({
+                                sessionId,
+                                modelOverride: previousModelOverride,
+                              }));
+                              window.dispatchEvent(new CustomEvent('app:showToast', {
+                                detail: i18nService.t('coworkModelSwitchFailed'),
+                              }));
+                            }
+                          } finally {
+                            if (requestId === modelPatchRequestIdRef.current) {
+                              setIsPatchingModel(false);
+                            }
                           }
-                        : undefined}
+                          return;
+                        }
+                        if (!currentAgent) return;
+                        dispatch(setSelectedModel({ agentId: currentAgentId, model: nextModel }));
+                      }}
                     />
-                    {coworkAgentEngine === 'openclaw' && agentModelIsInvalid && (
+                    {agentModelIsInvalid && (
                       <span className="max-w-60 text-[11px] leading-4 text-red-500">
                         {i18nService.t('agentModelInvalidHint')}
                       </span>

@@ -18,6 +18,8 @@ interface ModelSelectorProps {
   onChange?: (model: Model | null) => void;
   /** Show a "default" option at the top of the dropdown (controlled mode only). */
   defaultLabel?: string;
+  /** Disable interaction while the selected model is being persisted. */
+  disabled?: boolean;
 }
 
 const DROPDOWN_MAX_HEIGHT = 256; // matches max-h-64
@@ -27,6 +29,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   value,
   onChange,
   defaultLabel,
+  disabled = false,
 }) => {
   const dispatch = useDispatch();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -65,6 +68,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   }, [dropdownDirection]);
 
   const toggleOpen = () => {
+    if (disabled) return;
     if (!isOpen) {
       setResolvedDirection(resolveDirection());
     }
@@ -72,6 +76,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   };
 
   const handleModelSelect = (model: Model | null) => {
+    if (disabled) return;
     if (controlled) {
       onChange(model);
     } else if (model) {
@@ -137,11 +142,12 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   );
 
   return (
-    <div ref={containerRef} className="relative cursor-pointer">
+    <div ref={containerRef} className={`relative ${disabled ? 'cursor-wait' : 'cursor-pointer'}`}>
       <button
         type="button"
+        disabled={disabled}
         onClick={toggleOpen}
-        className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl hover:bg-surface-raised text-foreground transition-colors cursor-pointer max-w-[280px] ${isOpen ? 'bg-surface-raised' : ''}`}
+        className={`flex items-center space-x-2 px-3 py-1.5 rounded-xl hover:bg-surface-raised text-foreground transition-colors max-w-[280px] disabled:opacity-70 disabled:cursor-wait ${isOpen ? 'bg-surface-raised' : ''}`}
       >
         <span className="font-medium text-sm truncate">{selectedModel?.name ?? defaultLabel ?? ''}</span>
         <ChevronDownIcon className="h-4 w-4 shrink-0 dark:text-claude-darkTextSecondary text-claude-textSecondary" />

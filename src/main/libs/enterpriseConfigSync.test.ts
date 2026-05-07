@@ -1,7 +1,7 @@
-import { test, expect, describe, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const electronPaths = vi.hoisted(() => ({
   userData: '',
@@ -98,6 +98,73 @@ describe('enterpriseConfigSync', () => {
     expect(map['qqbot']).toBe('qq');
     expect(map['moltbot-popo']).toBe('popo');
     expect(map['openclaw-weixin']).toBe('weixin');
+  });
+
+  test('syncEnterpriseConfig maps agents.defaults.cwd to cowork workingDirectory', async () => {
+    const configDir = path.join(tmpDir, 'enterprise-config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'manifest.json'),
+      JSON.stringify({
+        version: '1.0.0',
+        name: 'Test',
+        sync: { openclaw: true, skills: false, agents: false, mcp: false },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(configDir, 'openclaw.json'),
+      JSON.stringify({
+        agents: {
+          defaults: {
+            workspace: '/state/workspace-main',
+            cwd: '/projects/user-selected',
+            sandbox: { mode: 'off' },
+          },
+        },
+      }),
+    );
+
+    const mod = await import('./enterpriseConfigSync');
+    const coworkUpdates: Array<Record<string, string>> = [];
+
+    mod.syncEnterpriseConfig(
+      configDir,
+      { get: () => undefined, set: () => undefined } as any,
+      {
+        setTelegramOpenClawConfig: () => undefined,
+        setDiscordOpenClawConfig: () => undefined,
+        getFeishuInstances: () => [],
+        setFeishuInstanceConfig: () => undefined,
+        setFeishuOpenClawConfig: () => undefined,
+        getDingTalkInstances: () => [],
+        setDingTalkInstanceConfig: () => undefined,
+        setDingTalkOpenClawConfig: () => undefined,
+        getQQInstances: () => [],
+        setQQInstanceConfig: () => undefined,
+        setQQConfig: () => undefined,
+        getWecomInstances: () => [],
+        setWecomInstanceConfig: () => undefined,
+        setWecomConfig: () => undefined,
+        setPopoConfig: () => undefined,
+        setNimConfig: () => undefined,
+        setWeixinConfig: () => undefined,
+        setNeteaseBeeChanConfig: () => undefined,
+      } as any,
+      () => undefined,
+      () => undefined,
+      (updates) => {
+        coworkUpdates.push(updates);
+      },
+      () => undefined,
+    );
+
+    expect(coworkUpdates).toEqual([
+      {
+        agentEngine: 'openclaw',
+        executionMode: 'local',
+        workingDirectory: '/projects/user-selected',
+      },
+    ]);
   });
 
   test('syncEnterpriseConfig updates existing WeCom instances when syncing channels', async () => {
@@ -534,10 +601,10 @@ describe('enterpriseConfigSync', () => {
       get: () => undefined,
       set: () => undefined,
     };
-    const setPopoConfigCalls: Array<Record<string, unknown>> = [];
+    const setPopoMultiInstanceCalls: Array<Record<string, unknown>> = [];
     const imStore = {
-      setPopoConfig: (config: Record<string, unknown>) => {
-        setPopoConfigCalls.push(config);
+      setPopoMultiInstanceConfig: (config: Record<string, unknown>) => {
+        setPopoMultiInstanceCalls.push(config);
       },
       setTelegramOpenClawConfig: () => undefined,
       setDiscordOpenClawConfig: () => undefined,
@@ -568,16 +635,22 @@ describe('enterpriseConfigSync', () => {
       () => undefined,
     );
 
-    expect(setPopoConfigCalls).toEqual([
+    expect(setPopoMultiInstanceCalls).toEqual([
       {
-        enabled: true,
-        appKey: 'new-key',
-        appSecret: 'new-secret',
-        connectionMode: 'webhook',
-        aesKey: 'old-aes',
-        dmPolicy: 'allowlist',
-        allowFrom: ['u1'],
-        webhookPort: 3200,
+        instances: [
+          {
+            enabled: true,
+            appKey: 'new-key',
+            appSecret: 'new-secret',
+            connectionMode: 'webhook',
+            aesKey: 'old-aes',
+            dmPolicy: 'allowlist',
+            allowFrom: ['u1'],
+            webhookPort: 3200,
+            instanceId: 'default',
+            instanceName: 'POPO Bot 1',
+          },
+        ],
       },
     ]);
   });
