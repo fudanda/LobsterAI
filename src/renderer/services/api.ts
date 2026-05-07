@@ -1,7 +1,7 @@
-import { store } from '../store';
-import { configService } from './config';
-import { ChatMessagePayload, ChatUserMessageInput, ImageAttachment } from '../types/chat';
 import { resolveCodingPlanBaseUrl } from '../../shared/providers';
+import { store } from '../store';
+import { ChatMessagePayload, ChatUserMessageInput, ImageAttachment } from '../types/chat';
+import { configService } from './config';
 
 export interface ApiConfig {
   apiKey: string;
@@ -242,7 +242,7 @@ class ApiService {
   }
 
   private providerRequiresApiKey(provider: string): boolean {
-    return provider !== 'ollama' && provider !== 'github-copilot';
+    return provider !== 'ollama' && provider !== 'lm-studio' && provider !== 'github-copilot';
   }
 
   // 检测当前选择的模型属于哪个 provider
@@ -251,7 +251,7 @@ class ApiService {
     if (
       normalizedHint
       && (
-        ['openai', 'deepseek', 'lzclaw', 'moonshot', 'zhipu', 'minimax', 'youdaozhiyun', 'qwen', 'openrouter', 'gemini', 'anthropic', 'xiaomi', 'stepfun', 'volcengine', 'github-copilot', 'ollama'].includes(normalizedHint)
+        ['openai', 'deepseek', 'lzclaw', 'moonshot', 'zhipu', 'minimax', 'youdaozhiyun', 'qwen', 'openrouter', 'gemini', 'anthropic', 'xiaomi', 'stepfun', 'volcengine', 'github-copilot', 'ollama', 'lm-studio'].includes(normalizedHint)
         || normalizedHint.startsWith('custom_')
       )
     ) {
@@ -321,7 +321,7 @@ class ApiService {
       throw new ApiError('API configuration not set. Please configure your API settings in the settings menu.');
     }
 
-    const selectedModel = store.getState().model.selectedModel;
+    const selectedModel = store.getState().model.defaultSelectedModel;
     const provider = this.detectProvider(
       selectedModel.id,
       selectedModel.providerKey ?? selectedModel.provider

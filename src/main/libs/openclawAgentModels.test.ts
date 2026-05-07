@@ -34,6 +34,34 @@ describe('buildAgentEntry', () => {
     });
   });
 
+  test('rewrites stale explicit model.primary when available providers moved it', () => {
+    const result = buildAgentEntry({
+      id: 'main',
+      name: 'main',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: 'openai/gpt-5.3-codex',
+      icon: '',
+      skillIds: [],
+      enabled: true,
+      isDefault: true,
+      source: 'custom',
+      presetId: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'deepseek/deepseek-v4-flash', {
+      availableProviders: {
+        'openai-codex': { models: [{ id: 'gpt-5.3-codex' }] },
+      },
+    });
+
+    expect(result).toMatchObject({
+      id: 'main',
+      model: { primary: 'openai-codex/gpt-5.3-codex' },
+    });
+  });
+
   test('falls back to the default model when agent model is an ambiguous bare id', () => {
     const result = buildAgentEntry({
       id: 'main',
@@ -116,6 +144,36 @@ describe('buildManagedAgentEntries', () => {
     expect(result[0]).toMatchObject({
       id: 'writer',
       model: { primary: 'anthropic/claude-sonnet-4' },
+    });
+  });
+
+  test('sets explicit workspace for non-main agents when stateDir is provided', () => {
+    const result = buildManagedAgentEntries({
+      agents: [
+        {
+          id: 'crab-boss',
+          name: 'CrabBoss',
+          description: '',
+          systemPrompt: '',
+          identity: '',
+          model: 'openai/gpt-4o',
+          icon: '🦀',
+          skillIds: [],
+          enabled: true,
+          isDefault: false,
+          source: 'custom',
+          presetId: '',
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+      fallbackPrimaryModel: 'anthropic/claude-sonnet-4',
+      stateDir: '/mock/state',
+    });
+
+    expect(result[0]).toMatchObject({
+      id: 'crab-boss',
+      workspace: expect.stringContaining('workspace-crab-boss'),
     });
   });
 });
@@ -215,6 +273,18 @@ describe('resolveQualifiedAgentModelRef', () => {
       status: 'ambiguous',
       modelId: 'deepseek-v3.2',
       providerIds: ['anthropic', 'lobsterai-server'],
+    });
+  });
+
+  test('rewrites legacy qualified refs when the model moved to one provider', () => {
+    expect(resolveQualifiedAgentModelRef({
+      agentModel: 'openai/gpt-5.3-codex',
+      availableProviders: {
+        'openai-codex': { models: [{ id: 'gpt-5.3-codex' }] },
+      },
+    })).toEqual({
+      status: 'qualified',
+      primaryModel: 'openai-codex/gpt-5.3-codex',
     });
   });
 });

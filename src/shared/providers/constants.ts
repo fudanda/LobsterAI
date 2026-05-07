@@ -33,11 +33,13 @@ export const ProviderName = {
   Minimax: 'minimax',
   Youdaozhiyun: 'youdaozhiyun',
   Qwen: 'qwen',
+  Qianfan: 'qianfan',
   Xiaomi: 'xiaomi',
   StepFun: 'stepfun',
   Volcengine: 'volcengine',
   OpenRouter: 'openrouter',
   Ollama: 'ollama',
+  LmStudio: 'lm-studio',
   Custom: 'custom',
   LobsteraiServer: 'lobsterai-server',
   Copilot: 'github-copilot',
@@ -52,8 +54,10 @@ export const OpenClawProviderId = {
   Google: 'google',
   Anthropic: 'anthropic',
   OpenAI: 'openai',
+  OpenAICodex: 'openai-codex',
   DeepSeek: 'deepseek',
   Lzclaw: 'lzclaw',
+  Qianfan: 'qianfan',
   Qwen: 'qwen-portal', // OpenClaw normalizes 'qwen' → 'qwen-portal'; use canonical ID to avoid config diff loop
   Zai: 'zai', // OpenClaw official provider ID for Zhipu/GLM
   Volcengine: 'volcengine',
@@ -65,6 +69,7 @@ export const OpenClawProviderId = {
   Copilot: 'github-copilot',
   LobsteraiCopilot: 'lobsterai-copilot',
   Ollama: 'ollama',
+  LmStudio: 'lm-studio',
   Lobster: 'lobster',
 } as const;
 export type OpenClawProviderId = typeof OpenClawProviderId[keyof typeof OpenClawProviderId];
@@ -74,6 +79,7 @@ export const OpenClawApi = {
   AnthropicMessages: 'anthropic-messages',
   OpenAICompletions: 'openai-completions',
   OpenAIResponses: 'openai-responses',
+  OpenAICodexResponses: 'openai-codex-responses',
   GoogleGenerativeAI: 'google-generative-ai',
 } as const;
 export type OpenClawApi = typeof OpenClawApi[keyof typeof OpenClawApi];
@@ -116,10 +122,11 @@ interface ProviderDefInput {
    * Coding Plan dedicated endpoints (only for codingPlanSupported=true providers).
    * openai: OpenAI-compatible format endpoint
    * anthropic: Anthropic-compatible format endpoint
+   * Either field may be omitted for providers that only support one protocol.
    */
   readonly codingPlanUrls?: {
-    readonly openai: string;
-    readonly anthropic: string;
+    readonly openai?: string;
+    readonly anthropic?: string;
   };
   /**
    * When set, resolveCodingPlanBaseUrl will use this format (and its URL) regardless
@@ -234,7 +241,10 @@ const PROVIDER_DEFINITIONS = [
     },
     region: 'china',
     enPriority: 0,
-    defaultModels: [{ id: 'kimi-k2.5', name: 'Kimi K2.5', supportsImage: true }],
+    defaultModels: [
+      { id: 'kimi-k2.6', name: 'Kimi K2.6', supportsImage: true },
+      { id: 'kimi-k2.5', name: 'Kimi K2.5', supportsImage: true },
+    ],
     codingPlanModels: [{ id: 'kimi-for-coding', name: 'Kimi K2.5', supportsImage: true }],
   },
   {
@@ -258,6 +268,7 @@ const PROVIDER_DEFINITIONS = [
     region: 'china',
     enPriority: 0,
     defaultModels: [
+      { id: 'qwen3.6-plus', name: 'Qwen3.6 Plus', supportsImage: true },
       { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus', supportsImage: true },
       { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', supportsImage: false },
     ],
@@ -327,10 +338,10 @@ const PROVIDER_DEFINITIONS = [
     region: 'china',
     enPriority: 0,
     defaultModels: [
-      { id: 'ark-code-latest', name: 'Auto', supportsImage: false },
-      { id: 'doubao-seed-2-0-pro-260215', name: 'Doubao-Seed-2.0-pro', supportsImage: false },
-      { id: 'doubao-seed-2-0-lite-260215', name: 'Doubao-Seed-2.0-lite', supportsImage: false },
-      { id: 'doubao-seed-2-0-mini-260215', name: 'Doubao-Seed-2.0-mini', supportsImage: false },
+      { id: 'doubao-seed-2-0-pro-260215', name: 'Doubao-Seed-2.0-pro', supportsImage: true },
+      { id: 'ark-code-latest', name: 'Auto', supportsImage: true },
+      { id: 'doubao-seed-2-0-lite-260215', name: 'Doubao-Seed-2.0-lite', supportsImage: true },
+      { id: 'doubao-seed-2-0-mini-260215', name: 'Doubao-Seed-2.0-mini', supportsImage: true },
     ],
   },
   {
@@ -356,6 +367,27 @@ const PROVIDER_DEFINITIONS = [
     ],
   },
   {
+    id: ProviderName.Qianfan,
+    label: 'Qianfan',
+    apiKeyUrl: 'https://console.bce.baidu.com/qianfan/ais/console/apiKey',
+    openClawProviderId: OpenClawProviderId.Qianfan,
+    defaultBaseUrl: 'https://qianfan.baidubce.com/v2',
+    defaultApiFormat: ApiFormat.OpenAI,
+    codingPlanSupported: true,
+    codingPlanUrls: {
+      openai: 'https://qianfan.baidubce.com/v2/coding/chat/completions',
+    },
+    preferredCodingPlanFormat: 'openai',
+    region: 'china',
+    enPriority: 0,
+    defaultModels: [
+      { id: 'deepseek-v3.2', name: 'DeepSeek V3.2', supportsImage: false },
+      { id: 'deepseek-r1', name: 'DeepSeek R1', supportsImage: false },
+      { id: 'ernie-4.5-8k', name: 'ERNIE 4.5 8K', supportsImage: false },
+      { id: 'ernie-4.5-turbo-8k', name: 'ERNIE 4.5 Turbo', supportsImage: false },
+    ],
+  },
+  {
     id: ProviderName.StepFun,
     label: 'StepFun',
     website: 'https://platform.stepfun.com',
@@ -376,14 +408,23 @@ const PROVIDER_DEFINITIONS = [
     openClawProviderId: OpenClawProviderId.Xiaomi,
     defaultBaseUrl: 'https://api.xiaomimimo.com/anthropic',
     defaultApiFormat: ApiFormat.Anthropic,
-    codingPlanSupported: false,
+    codingPlanSupported: true,
+    codingPlanUrls: {
+      openai: 'https://token-plan-cn.xiaomimimo.com/v1',
+      anthropic: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    },
     switchableBaseUrls: {
       anthropic: 'https://api.xiaomimimo.com/anthropic',
       openai: 'https://api.xiaomimimo.com/v1/chat/completions',
     },
     region: 'china',
     enPriority: 0,
-    defaultModels: [{ id: 'mimo-v2-flash', name: 'MiMo V2 Flash', supportsImage: false }],
+    defaultModels: [
+      { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', supportsImage: false },
+      { id: 'mimo-v2.5', name: 'MiMo V2.5', supportsImage: true },
+      { id: 'mimo-v2-pro', name: 'MiMo V2 Pro', supportsImage: false },
+      { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', supportsImage: false },
+    ],
   },
   {
     id: ProviderName.Ollama,
@@ -404,11 +445,27 @@ const PROVIDER_DEFINITIONS = [
       { id: 'glm-4.7-flash', name: 'GLM 4.7 Flash', supportsImage: false },
     ],
   },
+  {
+    id: ProviderName.LmStudio,
+    label: 'LM Studio',
+    website: 'https://lmstudio.ai',
+    openClawProviderId: OpenClawProviderId.LmStudio,
+    defaultBaseUrl: 'http://localhost:1234/v1',
+    defaultApiFormat: ApiFormat.OpenAI,
+    codingPlanSupported: false,
+    switchableBaseUrls: {
+      anthropic: 'http://localhost:1234',
+      openai: 'http://localhost:1234/v1',
+    },
+    region: 'china',
+    enPriority: 0,
+    defaultModels: [],
+  },
   // ── Global ──
   {
     id: ProviderName.Copilot,
     label: 'GitHub Copilot',
-    openClawProviderId: OpenClawProviderId.Copilot,
+    openClawProviderId: OpenClawProviderId.LobsteraiCopilot,
     defaultBaseUrl: 'https://api.individual.githubcopilot.com',
     defaultApiFormat: ApiFormat.OpenAI,
     codingPlanSupported: false,
@@ -518,8 +575,8 @@ export interface ProviderDef {
   readonly codingPlanSupported: boolean;
   /** Coding Plan dedicated endpoints */
   readonly codingPlanUrls?: {
-    readonly openai: string;
-    readonly anthropic: string;
+    readonly openai?: string;
+    readonly anthropic?: string;
   };
   /** When set, overrides caller's apiFormat for coding plan URL resolution. */
   readonly preferredCodingPlanFormat?: 'openai' | 'anthropic';
@@ -553,14 +610,21 @@ export interface ProviderDef {
 class ProviderRegistryImpl {
   private readonly defs: readonly ProviderDef[];
   private readonly idIndex: ReadonlyMap<string, ProviderDef>;
+  private readonly modelCapabilityIndex: ReadonlyMap<string, boolean>;
 
   constructor(definitions: readonly ProviderDef[]) {
     this.defs = definitions;
     const idx = new Map<string, ProviderDef>();
+    const modelIdx = new Map<string, boolean>();
     for (const def of definitions) {
       idx.set(def.id, def);
+      for (const model of [...def.defaultModels, ...(def.codingPlanModels ?? [])]) {
+        const existing = modelIdx.get(model.id);
+        modelIdx.set(model.id, existing === true || model.supportsImage);
+      }
     }
     this.idIndex = idx;
+    this.modelCapabilityIndex = modelIdx;
   }
 
   /** All provider IDs in definition order. */
@@ -597,6 +661,37 @@ class ProviderRegistryImpl {
     return this.idIndex.get(providerName)?.openClawProviderId ?? providerName ?? OpenClawProviderId.Lobster;
   }
 
+  getProviderModelSupportsImage(providerName: string, modelId: string): boolean | undefined {
+    const def = this.idIndex.get(providerName);
+    if (!def) return undefined;
+    const model = [...def.defaultModels, ...(def.codingPlanModels ?? [])]
+      .find(candidate => candidate.id === modelId);
+    return model?.supportsImage;
+  }
+
+  getKnownModelSupportsImage(modelId: string): boolean | undefined {
+    return this.modelCapabilityIndex.get(modelId);
+  }
+
+  resolveModelSupportsImage(
+    providerName: string,
+    modelId: string,
+    configuredSupportsImage?: boolean,
+  ): boolean {
+    const providerModelSupportsImage = this.getProviderModelSupportsImage(providerName, modelId);
+    if (providerModelSupportsImage !== undefined) {
+      return providerModelSupportsImage;
+    }
+    if (configuredSupportsImage === true) {
+      return true;
+    }
+    const knownModelSupportsImage = this.getKnownModelSupportsImage(modelId);
+    if (knownModelSupportsImage === true) {
+      return true;
+    }
+    return configuredSupportsImage ?? false;
+  }
+
   /** Provider IDs filtered by region. */
   idsByRegion(region: 'china' | 'global'): readonly string[] {
     return this.defs.filter(d => d.region === region).map(d => d.id);
@@ -618,12 +713,17 @@ class ProviderRegistryImpl {
     const orderedProviders = [...priority, ...china, ...global];
     const unique = [...new Set(orderedProviders)];
 
-    // Move ollama to the end (custom providers are appended dynamically by Settings)
+    // Move local providers (ollama, lm-studio) to the end
     const ollamaIdx = unique.indexOf(ProviderName.Ollama);
     if (ollamaIdx !== -1) {
       unique.splice(ollamaIdx, 1);
     }
+    const lmStudioIdx = unique.indexOf(ProviderName.LmStudio);
+    if (lmStudioIdx !== -1) {
+      unique.splice(lmStudioIdx, 1);
+    }
     unique.push(ProviderName.Ollama);
+    unique.push(ProviderName.LmStudio);
     return unique;
   }
 }

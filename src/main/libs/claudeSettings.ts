@@ -1,7 +1,4 @@
-import { app } from 'electron';
-import { join } from 'path';
-
-import { type ApiFormat,type ProviderConfig, ProviderName, resolveCodingPlanBaseUrl } from '../../shared/providers';
+import { type ApiFormat,type ProviderConfig, ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
 import type { SqliteStore } from '../sqliteStore';
 import type { CoworkApiConfig } from './coworkConfigStore';
 import { type AnthropicApiFormat,normalizeProviderApiFormat } from './coworkFormatTransform';
@@ -11,8 +8,18 @@ import {
   getCoworkOpenAICompatProxyStatus,
   type OpenAICompatProxyTarget,
 } from './coworkOpenAICompatProxy';
+import { readOpenAICodexAuthFile } from './openaiCodexAuth';
 
 type LocalProviderConfig = Omit<ProviderConfig, 'apiFormat'> & { apiFormat?: ApiFormat | 'native' };
+
+const gwDiagTs = (): string => {
+  const d = new Date();
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  const tz = d.getTimezoneOffset();
+  const sign = tz <= 0 ? '+' : '-';
+  const abs = Math.abs(tz);
+  return `[GW-RESTART-DIAG] ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
+};
 
 type AppConfig = {
   model?: {
@@ -20,6 +27,18 @@ type AppConfig = {
     defaultModelProvider?: string;
   };
   providers?: Record<string, LocalProviderConfig>;
+};
+
+type ProviderModelConfig = {
+  id: string;
+  name: string;
+  supportsImage?: boolean;
+};
+
+type ProviderModelInputConfig = {
+  id: string;
+  name?: string;
+  supportsImage?: boolean;
 };
 
 export type ApiConfigResolution = {
@@ -59,8 +78,26 @@ export function setServerBaseUrlGetter(getter: () => string): void {
 // Keyed by modelId → { supportsImage }
 let serverModelMetadataCache: Map<string, { supportsImage?: boolean }> = new Map();
 
-export function updateServerModelMetadata(models: Array<{ modelId: string; supportsImage?: boolean }>): void {
-  serverModelMetadataCache = new Map(models.map(m => [m.modelId, { supportsImage: m.supportsImage }]));
+const serializeServerModelMetadata = (
+  models: Array<{ modelId: string; supportsImage?: boolean }>,
+): string => JSON.stringify(
+  models
+    .map((model) => ({
+      modelId: model.modelId,
+      supportsImage: model.supportsImage,
+    }))
+    .sort((a, b) => a.modelId.localeCompare(b.modelId)),
+);
+
+export function updateServerModelMetadata(models: Array<{ modelId: string; supportsImage?: boolean }>): boolean {
+  const previous = serializeServerModelMetadata(getAllServerModelMetadata());
+  const nextCache = new Map(models.map(m => [m.modelId, { supportsImage: m.supportsImage }]));
+  const next = serializeServerModelMetadata(Array.from(nextCache.entries()).map(([modelId, meta]) => ({
+    modelId,
+    supportsImage: meta.supportsImage,
+  })));
+  serverModelMetadataCache = nextCache;
+  return previous !== next;
 }
 
 export function clearServerModelMetadata(): void {
@@ -74,32 +111,45 @@ export function getAllServerModelMetadata(): Array<{ modelId: string; supportsIm
   }));
 }
 
+function buildServerFallbackModels(effectiveModelId: string): NonNullable<LocalProviderConfig['models']> {
+  const models = getAllServerModelMetadata().map((model) => ({
+    id: model.modelId,
+    name: model.modelId,
+    supportsImage: model.supportsImage,
+  }));
+
+  if (!models.some(model => model.id === effectiveModelId)) {
+    const cachedMeta = serverModelMetadataCache.get(effectiveModelId);
+    models.unshift({
+      id: effectiveModelId,
+      name: effectiveModelId,
+      supportsImage: cachedMeta?.supportsImage,
+    });
+  }
+
+  return models;
+}
+
+function normalizeProviderModels(providerName: string, models?: ProviderModelInputConfig[]): ProviderModelConfig[] {
+  return (models ?? [])
+    .filter(model => model.id?.trim())
+    .map(model => ({
+      ...model,
+      name: model.name || model.id,
+      supportsImage: ProviderRegistry.resolveModelSupportsImage(
+        providerName,
+        model.id,
+        model.supportsImage,
+      ),
+    }));
+}
+
 const getStore = (): SqliteStore | null => {
   if (!storeGetter) {
     return null;
   }
   return storeGetter();
 };
-
-export function getClaudeCodePath(): string {
-  if (app.isPackaged) {
-    return join(
-      process.resourcesPath,
-      'app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk/cli.js'
-    );
-  }
-
-  // In development, try to find the SDK in the project root node_modules
-  // app.getAppPath() might point to dist-electron or other build output directories
-  // We need to look in the project root
-  const appPath = app.getAppPath();
-  // If appPath ends with dist-electron, go up one level
-  const rootDir = appPath.endsWith('dist-electron') 
-    ? join(appPath, '..') 
-    : appPath;
-
-  return join(rootDir, 'node_modules/@anthropic-ai/claude-agent-sdk/cli.js');
-}
 
 type MatchedProvider = {
   providerName: string;
@@ -122,7 +172,20 @@ function getEffectiveProviderApiFormat(providerName: string, apiFormat: unknown)
 }
 
 function providerRequiresApiKey(providerName: string): boolean {
-  return providerName !== ProviderName.Ollama;
+  return providerName !== ProviderName.Ollama && providerName !== ProviderName.LmStudio;
+}
+
+function shouldUseOpenAICodexOAuth(providerName: string, providerConfig: LocalProviderConfig): boolean {
+  if (providerName !== ProviderName.OpenAI) {
+    return false;
+  }
+  if (providerConfig.authType === 'oauth') {
+    return true;
+  }
+  if (providerConfig.apiKey?.trim()) {
+    return false;
+  }
+  return readOpenAICodexAuthFile() !== null;
 }
 
 function tryLobsteraiServerFallback(modelId?: string): MatchedProvider | null {
@@ -136,7 +199,7 @@ function tryLobsteraiServerFallback(modelId?: string): MatchedProvider | null {
   console.log('[ClaudeSettings] lobsterai-server fallback activated:', { baseURL, modelId: effectiveModelId, supportsImage: cachedMeta?.supportsImage });
   return {
     providerName: ProviderName.LobsteraiServer,
-    providerConfig: { enabled: true, apiKey: tokens.accessToken, baseUrl: baseURL, apiFormat: 'openai', models: [{ id: effectiveModelId, name: effectiveModelId, supportsImage: cachedMeta?.supportsImage }] },
+    providerConfig: { enabled: true, apiKey: tokens.accessToken, baseUrl: baseURL, apiFormat: 'openai', models: buildServerFallbackModels(effectiveModelId) },
     modelId: effectiveModelId,
     apiFormat: 'openai',
     baseURL,
@@ -223,7 +286,11 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
     }
   }
 
-  const [providerName, providerConfig] = providerEntry;
+  const [providerName, storedProviderConfig] = providerEntry;
+  const providerConfig = shouldUseOpenAICodexOAuth(providerName, storedProviderConfig)
+    ? { ...storedProviderConfig, authType: 'oauth' as const }
+    : storedProviderConfig;
+  const normalizedProviderModels = normalizeProviderModels(providerName, providerConfig.models);
 
   // MiniMax OAuth mode guard: if OAuth is selected but login has not been completed
   // (no access token), do not use the stale API key as an OAuth token.
@@ -251,19 +318,23 @@ function resolveMatchedProvider(appConfig: AppConfig): { matched: MatchedProvide
    // Check for API key or OAuth credentials
   const hasApiKey = providerConfig.apiKey?.trim();
   const hasOAuthCreds =
-    (providerName === ProviderName.Minimax && (providerConfig as any).authType === 'oauth' && !!(providerConfig as any).oauthAccessToken?.trim());
+    (providerName === ProviderName.Minimax && (providerConfig as any).authType === 'oauth' && !!(providerConfig as any).oauthAccessToken?.trim())
+    || shouldUseOpenAICodexOAuth(providerName, providerConfig);
   if (apiFormat === 'anthropic' && providerRequiresApiKey(providerName) && !providerConfig.apiKey?.trim() && !hasApiKey && !hasOAuthCreds) {
     const serverFallback = tryLobsteraiServerFallback(modelId);
     if (serverFallback) return { matched: serverFallback };
     return { matched: null, error: `Provider ${providerName} requires API key for Anthropic-compatible mode.` };
   }
 
-  const matchedModel = providerConfig.models?.find((m) => m.id === modelId);
+  const matchedModel = normalizedProviderModels.find((m) => m.id === modelId);
 
   return {
     matched: {
       providerName,
-      providerConfig,
+      providerConfig: {
+        ...providerConfig,
+        models: normalizedProviderModels,
+      },
       modelId,
       apiFormat,
       baseURL,
@@ -458,6 +529,9 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
 
     for (const [providerName, providerConfig] of Object.entries(appConfig.providers)) {
       if (!providerConfig?.enabled) continue;
+      if (shouldUseOpenAICodexOAuth(providerName, providerConfig)) {
+        continue;
+      }
       // For MiniMax OAuth, inject oauthAccessToken instead of apiKey
       let apiKey = providerConfig.apiKey?.trim();
       if (providerName === ProviderName.Minimax && (providerConfig as any).authType === 'oauth') {
@@ -470,6 +544,9 @@ export function resolveAllProviderApiKeys(): Record<string, string> {
       const envName = providerName.toUpperCase().replace(/[^A-Z0-9]/g, '_');
       result[envName] = apiKey || 'sk-lobsterai-local';
     }
+
+    const D = gwDiagTs;
+    console.log(`${D()} resolveAllProviderApiKeys: hasServer=${!!result.SERVER} providers=[${Object.keys(result).filter(k => k !== 'SERVER').join(',')}]`);
 
     return result;
   }
@@ -492,7 +569,7 @@ export type ProviderRawConfig = {
   apiType: 'anthropic' | 'openai';
   authType?: ProviderConfig['authType'];
   codingPlanEnabled: boolean;
-  models: Array<{ id: string; name?: string; supportsImage?: boolean }>;
+  models: ProviderModelConfig[];
 };
 
 export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
@@ -515,7 +592,7 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
       if (!oauthToken) continue; // OAuth not completed, skip
       const oauthBaseUrl = ((providerConfig as any).oauthBaseUrl?.trim()) || providerConfig.baseUrl?.trim() || '';
       if (!oauthBaseUrl) continue;
-      const models = (providerConfig.models ?? []).filter((m) => m.id?.trim());
+      const models = normalizeProviderModels(providerName, providerConfig.models);
       if (models.length === 0) continue;
       result.push({
         providerName,
@@ -523,6 +600,22 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
         apiKey: oauthToken,
         apiType: 'anthropic',
         authType: providerConfig.authType,
+        codingPlanEnabled: false,
+        models,
+      });
+      continue;
+    }
+
+    if (shouldUseOpenAICodexOAuth(providerName, providerConfig)) {
+      const baseURL = providerConfig.baseUrl?.trim() || 'https://api.openai.com/v1';
+      const models = normalizeProviderModels(providerName, providerConfig.models);
+      if (models.length === 0) continue;
+      result.push({
+        providerName,
+        baseURL,
+        apiKey: '',
+        apiType: 'openai',
+        authType: 'oauth',
         codingPlanEnabled: false,
         models,
       });
@@ -545,7 +638,7 @@ export function resolveAllEnabledProviderConfigs(): ProviderRawConfig[] {
 
     if (!effectiveBaseURL) continue;
 
-    const models = (providerConfig.models ?? []).filter((m) => m.id?.trim());
+    const models = normalizeProviderModels(providerName, providerConfig.models);
     if (models.length === 0) continue;
 
     result.push({

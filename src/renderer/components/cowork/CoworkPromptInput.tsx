@@ -6,11 +6,14 @@ import { useDispatch,useSelector } from 'react-redux';
 import { defaultConfig } from '../../config';
 import { agentService } from '../../services/agent';
 import { configService } from '../../services/config';
+import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
 import { RootState } from '../../store';
 import { selectDraftPrompts } from '../../store/selectors/coworkSelectors';
 import { addDraftAttachment, clearDraftAttachments, type DraftAttachment, setDraftAttachments, setDraftPrompt } from '../../store/slices/coworkSlice';
+import type { Model } from '../../store/slices/modelSlice';
+import { setSelectedModel } from '../../store/slices/modelSlice';
 import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
 import { CoworkImageAttachment } from '../../types/cowork';
 import { Skill } from '../../types/skill';
@@ -20,7 +23,7 @@ import PaperClipIcon from '../icons/PaperClipIcon';
 import XMarkIcon from '../icons/XMarkIcon';
 import ModelSelector from '../ModelSelector';
 import { ActiveSkillBadge,SkillsButton } from '../skills';
-import { resolveAgentModelSelection } from './agentModelSelection';
+import { resolveAgentModelSelection, resolveEffectiveModel, useAgentSelectedModel } from './agentModelSelection';
 import AttachmentCard from './AttachmentCard';
 import FolderSelectorPopover from './FolderSelectorPopover';
 
@@ -141,7 +144,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const agents = useSelector((state: RootState) => state.agent.agents);
     const coworkAgentEngine = useSelector((state: RootState) => state.cowork.config.agentEngine);
     const availableModels = useSelector((state: RootState) => state.model.availableModels);
-    const globalSelectedModel = useSelector((state: RootState) => state.model.selectedModel);
+    const currentSession = useSelector((state: RootState) => state.cowork.currentSession);
     const [value, setValue] = useState(draftPrompt);
     const [showFolderMenu, setShowFolderMenu] = useState(false);
     const [showFolderRequiredWarning, setShowFolderRequiredWarning] = useState(false);
@@ -184,19 +187,32 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   const activeSkillIds = useSelector((state: RootState) => state.skill.activeSkillIds);
   const skills = useSelector((state: RootState) => state.skill.skills);
   const currentAgent = agents.find((agent) => agent.id === currentAgentId);
+  const currentAgentSelectedModel = useAgentSelectedModel(currentAgentId, currentAgent?.model ?? '');
   const {
     selectedModel: agentSelectedModel,
     hasInvalidExplicitModel: agentModelIsInvalid,
   } = resolveAgentModelSelection({
+    sessionModel: currentSession && currentSession.id === sessionId ? currentSession.modelOverride : '',
     agentModel: currentAgent?.model ?? '',
     availableModels,
-    fallbackModel: globalSelectedModel,
+    fallbackModel: currentAgentSelectedModel,
     engine: coworkAgentEngine,
   });
+
+  if (sessionId && currentSession) {
+    console.log('[CoworkPromptInput] model resolve:', { sessionId, currentSessionId: currentSession.id, modelOverride: currentSession.modelOverride, resolvedName: agentSelectedModel?.name, resolvedProvider: agentSelectedModel?.providerKey, resolvedIsServer: agentSelectedModel?.isServerModel });
+  }
 
   const isLarge = size === 'large';
   const minHeight = isLarge ? 60 : 24;
   const maxHeight = isLarge ? 200 : 200;
+
+  const effectiveSelectedModel = resolveEffectiveModel({
+    sessionId,
+    agentSelectedModel,
+    globalSelectedModel: currentAgentSelectedModel,
+  });
+  const modelSupportsImage = !!effectiveSelectedModel?.supportsImage;
 
   // Load skills on mount
   useEffect(() => {
@@ -233,6 +249,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       if (shouldClear) {
         setValue('');
         dispatch(clearDraftAttachments(draftKey));
+        setImageVisionHint(false);
       }
       requestAnimationFrame(() => {
         textareaRef.current?.focus();
@@ -254,8 +271,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   // Sync value from draft when sessionId changes
   useEffect(() => {
     setValue(draftPrompt);
+    // Re-derive imageVisionHint from the new session's draft attachments
+    const hasImageWithoutVision = !modelSupportsImage && attachments.some(a => a.isImage || isImagePath(a.path));
+    setImageVisionHint(hasImageWithoutVision);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftKey]); // intentionally omit draftPrompt to only trigger on session switch
+  }, [draftKey]); // intentionally omit other deps to only trigger on session switch
 
   useEffect(() => {
     if (value !== draftPrompt) {
@@ -290,6 +310,18 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       : undefined;
 
     // Extract image attachments (with base64 data) for vision-capable models
+    console.log('[CoworkPromptInput] handleSubmit: attachment diagnosis', {
+      totalAttachments: attachments.length,
+      modelSupportsImage,
+      effectiveModelId: effectiveSelectedModel?.id ?? null,
+      attachmentDetails: attachments.map(a => ({
+        path: a.path,
+        name: a.name,
+        isImage: a.isImage,
+        hasDataUrl: !!a.dataUrl,
+        dataUrlLength: a.dataUrl?.length ?? 0,
+      })),
+    });
     const imageAtts: CoworkImageAttachment[] = [];
     for (const attachment of attachments) {
       if (attachment.isImage && attachment.dataUrl) {
@@ -300,7 +332,19 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             mimeType: extracted.mimeType,
             base64Data: extracted.base64Data,
           });
+        } else {
+          console.warn('[CoworkPromptInput] handleSubmit: extractBase64FromDataUrl returned null', {
+            name: attachment.name,
+            dataUrlPrefix: attachment.dataUrl.slice(0, 60),
+          });
         }
+      } else if (attachment.isImage) {
+        console.warn('[CoworkPromptInput] handleSubmit: image attachment missing dataUrl', {
+          path: attachment.path,
+          name: attachment.name,
+          isImage: attachment.isImage,
+          hasDataUrl: !!attachment.dataUrl,
+        });
       }
     }
 
@@ -308,8 +352,12 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     // Image attachments also need their file paths in the prompt so the model knows
     // where the original files are located (e.g., for skills like seedream that need --image <path>).
     // Note: inline/clipboard images have pseudo-paths starting with 'inline:' and are excluded.
+    // Note: image attachments that already carry base64 data are excluded — their content
+    // is delivered via the attachments parameter of chat.send. Including the file path
+    // would trigger OpenClaw's Native-image detection, which rejects paths outside allowed
+    // directories and can drop the base64 image during sanitization (macOS-only bug).
     const attachmentLines = attachments
-      .filter((a) => !a.path.startsWith('inline:'))
+      .filter((a) => !a.path.startsWith('inline:') && !(a.isImage && a.dataUrl))
       .map((attachment) => `${i18nService.t('inputFileLabel')}: ${attachment.path}`)
       .join('\n');
     const finalPrompt = trimmedValue
@@ -322,6 +370,14 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
         names: imageAtts.map(a => a.name),
         base64Lengths: imageAtts.map(a => a.base64Data.length),
       });
+    } else if (attachments.some(a => a.isImage || isImagePath(a.path))) {
+      console.warn('[CoworkPromptInput] handleSubmit: has image-like attachments but imageAtts is EMPTY — images will NOT be sent as base64', {
+        imageAttachments: attachments.filter(a => a.isImage || isImagePath(a.path)).map(a => ({
+          path: a.path,
+          isImage: a.isImage,
+          hasDataUrl: !!a.dataUrl,
+        })),
+      });
     }
     const result = await onSubmit(finalPrompt, skillPrompt, imageAtts.length > 0 ? imageAtts : undefined);
     if (result === false) return;
@@ -329,7 +385,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     dispatch(setDraftPrompt({ sessionId: draftKey, draft: '' }));
     dispatch(clearDraftAttachments(draftKey));
     setImageVisionHint(false);
-  }, [value, isStreaming, disabled, onSubmit, activeSkillIds, skills, attachments, showFolderSelector, workingDirectory, dispatch, draftKey]);
+  }, [value, isStreaming, disabled, onSubmit, activeSkillIds, skills, attachments, showFolderSelector, workingDirectory, dispatch, draftKey, effectiveSelectedModel?.id, modelSupportsImage]);
 
   const handleSelectSkill = useCallback((skill: Skill) => {
     dispatch(toggleActiveSkill(skill.id));
@@ -409,9 +465,6 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       onWorkingDirectoryChange(path);
     }
   };
-
-  const effectiveSelectedModel = coworkAgentEngine === 'openclaw' ? agentSelectedModel : globalSelectedModel;
-  const modelSupportsImage = !!effectiveSelectedModel?.supportsImage;
 
   const addAttachment = useCallback((filePath: string, imageInfo?: { isImage: boolean; dataUrl?: string }) => {
     if (!filePath) return;
@@ -517,6 +570,17 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
         ? isImagePath(nativePath)
         : isImageMimeType(file.type);
 
+      console.log('[CoworkPromptInput] handleIncomingFiles: processing file', {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        nativePath,
+        fileIsImage,
+        modelSupportsImage,
+        effectiveModelId: effectiveSelectedModel?.id ?? null,
+        effectiveModelSupportsImage: effectiveSelectedModel?.supportsImage ?? null,
+      });
+
       if (fileIsImage) {
         if (modelSupportsImage) {
           // For images on vision-capable models, read as data URL
@@ -524,13 +588,16 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             try {
               const result = await window.electron.dialog.readFileAsDataUrl(nativePath);
               if (result.success && result.dataUrl) {
+                console.log('[CoworkPromptInput] handleIncomingFiles: native image read OK', { nativePath, dataUrlLength: result.dataUrl.length });
                 addAttachment(nativePath, { isImage: true, dataUrl: result.dataUrl });
                 continue;
               }
+              console.warn('[CoworkPromptInput] handleIncomingFiles: readFileAsDataUrl returned falsy', { nativePath, success: result.success });
             } catch (error) {
               console.error('Failed to read image as data URL:', error);
             }
             // Fallback: add as regular file attachment
+            console.warn('[CoworkPromptInput] handleIncomingFiles: native image fallback to path-only (no dataUrl)', { nativePath });
             addAttachment(nativePath);
           } else {
             // No native path (clipboard/drag from browser):
@@ -539,11 +606,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             let dataUrl: string | null = null;
             try {
               dataUrl = await fileToDataUrl(file);
+              console.log('[CoworkPromptInput] handleIncomingFiles: clipboard fileToDataUrl OK', { dataUrlLength: dataUrl?.length ?? 0 });
             } catch (error) {
-              console.error('Failed to read clipboard image as data URL:', error);
+              console.error('[CoworkPromptInput] handleIncomingFiles: clipboard fileToDataUrl FAILED:', error);
             }
 
             const stagedPath = await saveInlineFile(file);
+            console.log('[CoworkPromptInput] handleIncomingFiles: clipboard saveInlineFile result', { stagedPath, hasDataUrl: !!dataUrl });
 
             if (stagedPath) {
               addAttachment(stagedPath, {
@@ -560,6 +629,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
           continue;
         }
         // Model doesn't support image input — add as file path and show hint
+        console.warn('[CoworkPromptInput] handleIncomingFiles: image skipped vision path because modelSupportsImage=false', {
+          fileName: file.name,
+          effectiveModelId: effectiveSelectedModel?.id ?? null,
+          effectiveModelSupportsImage: effectiveSelectedModel?.supportsImage ?? null,
+        });
         hasImageWithoutVision = true;
       }
 
@@ -577,7 +651,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     if (hasImageWithoutVision) {
       setImageVisionHint(true);
     }
-  }, [addAttachment, addImageAttachmentFromDataUrl, disabled, fileToDataUrl, getNativeFilePath, isStreaming, modelSupportsImage, saveInlineFile]);
+  }, [addAttachment, addImageAttachmentFromDataUrl, disabled, effectiveSelectedModel, fileToDataUrl, getNativeFilePath, isStreaming, modelSupportsImage, saveInlineFile]);
 
   const handleAddFile = useCallback(async () => {
     if (isAddingFile || disabled || isStreaming) return;
@@ -594,14 +668,19 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
             try {
               const readResult = await window.electron.dialog.readFileAsDataUrl(filePath);
               if (readResult.success && readResult.dataUrl) {
+                console.log('[CoworkPromptInput] handleAddFile: image read OK', { filePath, dataUrlLength: readResult.dataUrl.length });
                 addAttachment(filePath, { isImage: true, dataUrl: readResult.dataUrl });
                 continue;
               }
+              console.warn('[CoworkPromptInput] handleAddFile: readFileAsDataUrl returned falsy', { filePath });
             } catch (error) {
               console.error('Failed to read image as data URL:', error);
-
             }
           } else {
+            console.warn('[CoworkPromptInput] handleAddFile: image skipped vision path because modelSupportsImage=false', {
+              filePath,
+              effectiveModelId: effectiveSelectedModel?.id ?? null,
+            });
             hasImageWithoutVision = true;
           }
         }
@@ -616,7 +695,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     } finally {
       setIsAddingFile(false);
     }
-  }, [addAttachment, isAddingFile, disabled, isStreaming, modelSupportsImage]);
+  }, [addAttachment, effectiveSelectedModel, isAddingFile, disabled, isStreaming, modelSupportsImage]);
 
   const handleRemoveAttachment = useCallback((path: string) => {
     dispatch(setDraftAttachments({
@@ -744,7 +823,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   return (
     <div className="relative">
       {attachments.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
+        <div className="mb-2 flex flex-wrap gap-2 max-h-[136px] overflow-y-auto">
           {attachments.map((attachment) => (
             <AttachmentCard
               key={attachment.path}
@@ -842,15 +921,31 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                     )}
                   </>
                 )}
-                {showModelSelector && !remoteManaged && (
+                {showModelSelector && (
                   <div className="flex flex-col items-start gap-1">
                     <ModelSelector
                       dropdownDirection="up"
-                      value={coworkAgentEngine === 'openclaw' ? agentSelectedModel : null}
+                      value={coworkAgentEngine === 'openclaw'
+                        ? (agentModelIsInvalid && currentSession?.modelOverride
+                          ? { id: '__invalid__', name: currentSession.modelOverride.split('/').pop() || currentSession.modelOverride } as Model
+                          : agentSelectedModel)
+                        : null}
                       onChange={coworkAgentEngine === 'openclaw'
                         ? async (nextModel) => {
-                            if (!currentAgent || !nextModel) return;
-                            await agentService.updateAgent(currentAgent.id, { model: toOpenClawModelRef(nextModel) });
+                            if (!nextModel) return;
+                            const modelRef = toOpenClawModelRef(nextModel);
+                            console.log('[CoworkPromptInput] model selected:', { id: nextModel.id, providerKey: nextModel.providerKey, isServerModel: nextModel.isServerModel, modelRef });
+                            if (sessionId) {
+                              await coworkService.patchSession(sessionId, { model: modelRef });
+                              if (currentAgent && agentModelIsInvalid) {
+                                console.log('[CoworkPromptInput] auto-fixing invalid agent model:', currentAgent.id, currentAgent.model, '->', modelRef);
+                                agentService.updateAgent(currentAgent.id, { model: modelRef });
+                              }
+                              return;
+                            }
+                            if (!currentAgent) return;
+                            console.log('[CoworkPromptInput] home page model change (Redux only, no agent update):', { modelRef, modelName: nextModel.name, providerKey: nextModel.providerKey });
+                            dispatch(setSelectedModel({ agentId: currentAgentId, model: nextModel }));
                           }
                         : undefined}
                     />

@@ -1,6 +1,3 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { createPortal } from 'react-dom';
-import { useDispatch, useSelector } from 'react-redux';
 import { ShareIcon } from '@heroicons/react/20/solid';
 import {
   CheckIcon,
@@ -9,21 +6,26 @@ import {
   PhotoIcon,
 } from '@heroicons/react/24/outline';
 import { FolderIcon } from '@heroicons/react/24/solid';
-import {
-  selectCurrentSession,
-  selectIsStreaming,
-  selectRemoteManaged,
-  selectLastMessageContent,
-  selectCurrentMessagesLength,
-} from '../../store/selectors/coworkSelectors';
+import React, { useCallback, useEffect, useMemo,useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useDispatch, useSelector } from 'react-redux';
+
 import { getScheduledReminderDisplayText } from '../../../scheduledTask/reminderText';
 import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import { RootState } from '../../store';
+import {
+  selectCurrentMessagesLength,
+  selectCurrentSession,
+  selectIsStreaming,
+  selectLastMessageContent,
+  selectRemoteManaged,
+} from '../../store/selectors/coworkSelectors';
 import { setActiveSkillIds } from '../../store/slices/skillSlice';
-import type { CoworkMessage, CoworkMessageMetadata, CoworkImageAttachment } from '../../types/cowork';
+import type { CoworkImageAttachment,CoworkMessage, CoworkMessageMetadata } from '../../types/cowork';
 import type { Skill } from '../../types/skill';
 import { getCompactFolderName } from '../../utils/path';
+import { parseUserMessageForDisplay } from '../../utils/userMessageDisplay';
 import Modal from '../common/Modal';
 import ComposeIcon from '../icons/ComposeIcon';
 import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
@@ -922,7 +924,7 @@ const ToolCallGroup: React.FC<{
               {toolName}
             </span>
             {toolInputSummary && (
-              <code className="text-xs text-muted font-mono truncate max-w-[400px]">
+              <code className="text-xs text-muted font-mono truncate max-w-full">
                 {toolInputSummary}
               </code>
             )}
@@ -1166,6 +1168,19 @@ export const UserMessageItem: React.FC<{
   const [isHovered, setIsHovered] = useState(false);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!expandedImage) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpandedImage(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [expandedImage]);
+
+  // Transform content for display: strip IM media metadata, render images inline
+  const displayContent = useMemo(
+    () => parseUserMessageForDisplay(message.content || ''),
+    [message.content]
+  );
+
   // Get skills used for this message
   const messageSkillIds = (message.metadata as CoworkMessageMetadata)?.skillIds || [];
   const messageSkills = messageSkillIds
@@ -1181,19 +1196,20 @@ export const UserMessageItem: React.FC<{
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl min-w-[320px] mx-auto">
         <div className="pl-4 sm:pl-8 md:pl-12">
           <div className="flex items-start gap-3 flex-row-reverse">
             <div className="w-full min-w-0 flex flex-col items-end">
-              <div className="w-fit max-w-[42rem] rounded-2xl px-4 py-2.5 bg-surface text-foreground shadow-subtle">
-                {message.content?.trim() && (
+              <div className="w-fit max-w-[54rem] rounded-2xl px-4 py-2.5 bg-surface text-foreground shadow-subtle">
+                {displayContent?.trim() && (
                   <MarkdownContent
-                    content={message.content}
+                    content={displayContent}
                     className="max-w-none whitespace-pre-wrap break-words"
+                    onImageClick={setExpandedImage}
                   />
                 )}
                 {imageAttachments.length > 0 && (
-                  <div className={`flex flex-wrap gap-2 ${message.content?.trim() ? 'mt-2' : ''}`}>
+                  <div className={`flex flex-wrap gap-2 ${displayContent?.trim() ? 'mt-2' : ''}`}>
                     {imageAttachments.map((img, idx) => (
                       <div key={idx} className="relative group">
                         <img
@@ -1274,7 +1290,15 @@ const AssistantMessageItem: React.FC<{
   showCopyButton = false,
 }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const displayContent = mapDisplayText ? mapDisplayText(message.content) : message.content;
+
+  useEffect(() => {
+    if (!expandedImage) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpandedImage(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [expandedImage]);
 
   return (
     <div
@@ -1288,6 +1312,7 @@ const AssistantMessageItem: React.FC<{
           className="prose dark:prose-invert max-w-none"
           resolveLocalFilePath={resolveLocalFilePath}
           showRevealInFolderAction
+          onImageClick={setExpandedImage}
         />
       </div>
       {showCopyButton && (
@@ -1295,6 +1320,19 @@ const AssistantMessageItem: React.FC<{
           <CopyButton
             content={displayContent}
             visible={isHovered}
+          />
+        </div>
+      )}
+      {expandedImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 cursor-pointer"
+          onClick={() => setExpandedImage(null)}
+        >
+          <img
+            src={expandedImage}
+            alt="Preview"
+            className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
           />
         </div>
       )}
@@ -1333,7 +1371,7 @@ const StreamingActivityBar: React.FC<{ messages: CoworkMessage[] }> = ({ message
 
   return (
     <div className="shrink-0 animate-fade-in px-4">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl min-w-[320px] mx-auto">
         <div className="streaming-bar" />
         <div className="py-1">
           <span className="text-xs text-secondary">
@@ -1492,7 +1530,7 @@ export const AssistantTurnBlock: React.FC<{
 
   return (
     <div className="px-4 py-2">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl min-w-[320px] mx-auto">
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0 px-4 py-3 space-y-3">
             {visibleAssistantItems.map((item, index) => {
@@ -1626,6 +1664,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       setRenameValue(currentSession.title);
       ignoreNextBlurRef.current = false;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRenaming, currentSession?.title]);
 
   useEffect(() => {
@@ -1659,6 +1698,11 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     setHoveredRailIndex(null);
   }, [currentSession?.id]);
 
+  const closeMenu = useCallback(() => {
+    setMenuPosition(null);
+    setShowConfirmDelete(false);
+  }, []);
+
   // Close menu on outside click
   useEffect(() => {
     if (!menuPosition) return;
@@ -1684,7 +1728,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
       window.removeEventListener('scroll', handleScroll, true);
       window.removeEventListener('resize', handleScroll);
     };
-  }, [menuPosition]);
+  }, [menuPosition, closeMenu]);
 
   // Helper: truncate path for display
   const truncatePath = (path: string, maxLength = 20): string => {
@@ -1718,11 +1762,6 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
     if (position) {
       setMenuPosition(position);
     }
-    setShowConfirmDelete(false);
-  };
-
-  const closeMenu = () => {
-    setMenuPosition(null);
     setShowConfirmDelete(false);
   };
 
@@ -2791,7 +2830,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
 
       {/* Input Area */}
       <div className="p-4 shrink-0">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl min-w-[320px] mx-auto">
           <CoworkPromptInput
             ref={promptInputRef}
             onSubmit={onContinue}
@@ -2802,7 +2841,7 @@ const CoworkSessionDetail: React.FC<CoworkSessionDetailProps> = ({
             size="large"
             remoteManaged={remoteManaged}
             onManageSkills={remoteManaged ? undefined : onManageSkills}
-            showModelSelector={!remoteManaged}
+            showModelSelector={true}
             sessionId={currentSession?.id}
           />
         </div>

@@ -6,7 +6,7 @@ import {
   Cog6ToothIcon,
   CubeIcon,
   InformationCircleIcon,
-  SignalIcon,
+   SignalIcon,
   UserCircleIcon,
   XCircleIcon,
   XMarkIcon,
@@ -16,7 +16,9 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import { ModelProvidersUi, ModelSettingsSoloProvider } from '@/constants/modelProvidersUi';
 
-import { ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
+
+import { type AppUpdateInfo,type AppUpdateRuntimeState,AppUpdateSource,AppUpdateStatus } from '../../shared/appUpdate/constants';
+import { OpenClawProviderId, ProviderName, ProviderRegistry, resolveCodingPlanBaseUrl } from '../../shared/providers';
 import {
   type AppConfig,
   defaultConfig,
@@ -41,6 +43,7 @@ import {
 import { i18nService, LanguageType } from '../services/i18n';
 import { imService } from '../services/im';
 import { themeService } from '../services/theme';
+import type { RootState } from '../store';
 import { selectCoworkConfig } from '../store/selectors/coworkSelectors';
 import { setAvailableModels } from '../store/slices/modelSlice';
 import type {
@@ -48,9 +51,11 @@ import type {
   CoworkMemoryStats,
   CoworkUserMemoryEntry,
   OpenClawEngineStatus,
-  OpenClawSessionKeepAlive as OpenClawSessionKeepAliveValue,
+  OpenClawSessionKeepAlive,
 } from '../types/cowork';
+import { OpenClawSessionKeepAlive as OpenClawSessionKeepAliveValues } from '../types/cowork';
 import Modal from './common/Modal';
+import EmbeddingSettingsSection from './cowork/EmbeddingSettingsSection';
 import ErrorMessage from './ErrorMessage';
 import BrainIcon from './icons/BrainIcon';
 import PencilIcon from './icons/PencilIcon';
@@ -117,6 +122,21 @@ type ProviderConnectionTestResult = {
   provider: ProviderType;
 };
 
+const resolveModelSupportsImageForProvider = (
+  providerName: string,
+  model: { id: string; supportsImage?: boolean },
+): boolean => ProviderRegistry.resolveModelSupportsImage(providerName, model.id, model.supportsImage);
+
+const getOpenClawProviderIdForConfig = (
+  providerName: string,
+  providerConfig: ProviderConfig,
+): string => {
+  if (providerName === ProviderName.OpenAI && providerConfig.authType === 'oauth') {
+    return OpenClawProviderId.OpenAICodex;
+  }
+  return ProviderRegistry.getOpenClawProviderId(providerName);
+};
+
 interface ProviderExportEntry {
   enabled: boolean;
   apiKey: PasswordEncryptedPayload;
@@ -160,15 +180,10 @@ interface ProvidersImportPayload {
   providers?: Record<string, ProvidersImportEntry>;
 }
 
-const providerRequiresApiKey = (provider: ProviderType) =>
-  provider !== 'ollama' && provider !== 'github-copilot';
-const normalizeBaseUrl = (baseUrl: string): string =>
-  baseUrl.trim().replace(/\/+$/, '').toLowerCase();
-const normalizeApiFormat = (value: unknown): 'anthropic' | 'openai' =>
-  value === 'openai' ? 'openai' : 'anthropic';
 
+const providerRequiresApiKey = (provider: ProviderType) => provider !== 'ollama' && provider !== 'lm-studio' && provider !== 'github-copilot';
 const hasProviderAuthConfigured = (provider: ProviderType, config: ProviderConfig): boolean => {
-  if (provider === 'ollama') {
+  if (provider === 'ollama' || provider === 'lm-studio') {
     return true;
   }
 
@@ -177,6 +192,13 @@ const hasProviderAuthConfigured = (provider: ProviderType, config: ProviderConfi
       return config.apiKey.trim().length > 0;
     }
     return (config.oauthAccessToken?.trim().length ?? 0) > 0;
+  }
+
+  // OpenAI in OAuth mode stores tokens in <CODEX_HOME>/auth.json (read by the
+  // OpenClaw runtime), not in the provider config — `authType === 'oauth'`
+  // alone is the signal that ChatGPT login completed.
+  if (provider === 'openai' && config.authType === 'oauth') {
+    return true;
   }
 
   return config.apiKey.trim().length > 0;
@@ -233,7 +255,7 @@ const getFixedApiFormatForProvider = (
   if (provider === 'openai' || provider === 'stepfun') {
     return 'openai';
   }
-  if (provider === 'youdaozhiyun' || provider === 'github-copilot') {
+  if (provider === 'youdaozhiyun' || provider === 'github-copilot' || provider === 'qianfan') {
     return 'openai';
   }
   // Moonshot /anthropic endpoint does not fully implement the Anthropic Messages
@@ -254,13 +276,31 @@ const getFixedApiFormatForProvider = (
   }
   return null;
 };
-const getEffectiveApiFormat = (
-  provider: string,
-  value: unknown,
-): 'anthropic' | 'openai' | 'gemini' =>
-  getFixedApiFormatForProvider(provider) ?? normalizeApiFormat(value);
-const shouldShowApiFormatSelector = (provider: string): boolean =>
-  getFixedApiFormatForProvider(provider) === null;
+const getEffectiveApiFormat = (provider: string, value: unknown): 'anthropic' | 'openai' | 'gemini' => (
+  getFixedApiFormatForProvider(provider) ?? normalizeApiFormat(value)
+);
+const shouldShowApiFormatSelector = (provider: string): boolean => (
+  getFixedApiFormatForProvider(provider) === null
+);
+const getUpdateCheckStatusFromRuntimeStatus = (
+  state: AppUpdateRuntimeState,
+): 'idle' | 'checking' | 'upToDate' | 'error' | 'downloading' | 'ready' => {
+  if (state.source !== AppUpdateSource.Manual) {
+    return 'idle';
+  }
+  switch (state.status) {
+    case AppUpdateStatus.Checking:
+      return 'checking';
+    case AppUpdateStatus.Downloading:
+      return 'downloading';
+    case AppUpdateStatus.Ready:
+      return 'ready';
+    case AppUpdateStatus.Error:
+      return 'error';
+    default:
+      return 'idle';
+  }
+};
 const getProviderDefaultBaseUrl = (
   provider: ProviderType,
   apiFormat: 'anthropic' | 'openai' | 'gemini',
@@ -380,7 +420,7 @@ const getDefaultProviders = (): ProvidersConfig => {
         models: providerConfig.models?.map(model => ({
           ...model,
           name: model.name.replace('(Secure)', secureSuffix),
-          supportsImage: model.supportsImage ?? false,
+          supportsImage: resolveModelSupportsImageForProvider(providerKey, model),
         })),
       },
     ]),
@@ -591,6 +631,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [language, setLanguage] = useState<LanguageType>('zh');
   const [autoLaunch, setAutoLaunchState] = useState(false);
   const [useSystemProxy, setUseSystemProxy] = useState(false);
+  const [sqliteAutoBackupEnabled, setSqliteAutoBackupEnabled] = useState(false);
   const [isUpdatingAutoLaunch, setIsUpdatingAutoLaunch] = useState(false);
   const [preventSleep, setPreventSleepState] = useState(false);
   const [isUpdatingPreventSleep, setIsUpdatingPreventSleep] = useState(false);
@@ -625,12 +666,27 @@ const Settings: React.FC<SettingsProps> = ({
   const [minimaxOAuthRegion, setMinimaxOAuthRegion] = useState<MiniMaxRegion>('cn');
   const minimaxOAuthCancelRef = useRef(false);
 
+  // OpenAI ChatGPT (Codex) OAuth state
+  type OpenAIOAuthPhase =
+    | { kind: 'idle' }
+    | { kind: 'pending' }
+    | { kind: 'success'; email?: string }
+    | { kind: 'error'; message: string };
+  const [openaiOAuthPhase, setOpenaiOAuthPhase] = useState<OpenAIOAuthPhase>({ kind: 'idle' });
+  // Mirrors <CODEX_HOME>/auth.json on disk; refreshed on tab focus and after
+  // login/logout. `null` = not yet checked.
+  const [openaiOAuthStatus, setOpenaiOAuthStatus] = useState<
+    { loggedIn: false } | { loggedIn: true; email?: string } | null
+  >(null);
+
   // Add state for providers configuration
   const [providers, setProviders] = useState<ProvidersConfig>(() => getDefaultProviders());
 
   // authType defaults to undefined on first open, which should behave as OAuth mode
   const minimaxIsOAuthMode = providers.minimax.authType !== 'apikey';
-  const isBaseUrlLocked = true;
+  // OpenAI defaults to API key mode unless the user explicitly opts in to OAuth
+  const openaiIsOAuthMode = providers.openai.authType === 'oauth';
+  const isBaseUrlLocked = (activeProvider === 'zhipu' && providers.zhipu.codingPlanEnabled) || (activeProvider === 'qwen' && providers.qwen.codingPlanEnabled) || (activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled) || (activeProvider === 'moonshot' && providers.moonshot.codingPlanEnabled) || (activeProvider === 'qianfan' && providers.qianfan.codingPlanEnabled) || (activeProvider === 'xiaomi' && providers.xiaomi.codingPlanEnabled) || (activeProvider === 'minimax' && minimaxIsOAuthMode) || (activeProvider === 'openai' && openaiIsOAuthMode);
 
   // 创建引用来确保内容区域的滚动
   const contentRef = useRef<HTMLDivElement>(null);
@@ -667,6 +723,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [testMode, setTestMode] = useState(false);
   const [logoClickCount, setLogoClickCount] = useState(0);
   const [testModeUnlocked, setTestModeUnlocked] = useState(false);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<'idle' | 'checking' | 'upToDate' | 'error' | 'downloading' | 'ready'>('idle');
+  const [appUpdateState, setAppUpdateState] = useState<AppUpdateRuntimeState | null>(null);
 
   useEffect(() => {
     window.electron.appInfo.getVersion().then(setAppVersion);
@@ -676,22 +734,182 @@ const Settings: React.FC<SettingsProps> = ({
     setShowApiKey(false);
   }, [activeProvider]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    const syncUpdateStatus = async () => {
+      try {
+        const state = await window.electron.appUpdate.getState();
+        if (!mounted) {
+          return;
+        }
+        setAppUpdateState(state);
+        setUpdateCheckStatus(getUpdateCheckStatusFromRuntimeStatus(state));
+      } catch (error) {
+        console.error('Failed to load app update state in settings:', error);
+      }
+    };
+
+    void syncUpdateStatus();
+
+    const unsubscribe = window.electron.appUpdate.onStateChanged((state) => {
+      if (
+        updateCheckTimerRef.current != null &&
+        state.source === AppUpdateSource.Manual &&
+        state.status !== AppUpdateStatus.Idle
+      ) {
+        window.clearTimeout(updateCheckTimerRef.current);
+        updateCheckTimerRef.current = null;
+      }
+      setAppUpdateState(state);
+      setUpdateCheckStatus(getUpdateCheckStatusFromRuntimeStatus(state));
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const handleCopyContactEmail = useCallback(async () => {
+    const copied = await copyTextToClipboard(ABOUT_CONTACT_EMAIL);
+    if (copied) {
+      setEmailCopied(true);
+      if (emailCopiedTimerRef.current != null) {
+        window.clearTimeout(emailCopiedTimerRef.current);
+      }
+      emailCopiedTimerRef.current = window.setTimeout(() => {
+        setEmailCopied(false);
+        emailCopiedTimerRef.current = null;
+      }, 1200);
+    }
+  }, []);
+
+  const authUser = useSelector((state: RootState) => state.auth.user);
+
+  const handleCheckUpdate = useCallback(async () => {
+    if (updateCheckStatus === 'checking' || !appVersion) return;
+    setUpdateCheckStatus('checking');
+    try {
+      const result = await window.electron.appUpdate.checkNow({ manual: true, userId: authUser?.yid });
+      if (!result.success) {
+        throw new Error(result.error || 'Update check failed');
+      }
+
+      if (!result.updateFound) {
+        setUpdateCheckStatus('upToDate');
+        if (updateCheckTimerRef.current != null) {
+          window.clearTimeout(updateCheckTimerRef.current);
+        }
+        updateCheckTimerRef.current = window.setTimeout(() => {
+          setUpdateCheckStatus('idle');
+          updateCheckTimerRef.current = null;
+        }, 3000);
+        return;
+      }
+
+      if (result.state.status === AppUpdateStatus.Ready) {
+        setUpdateCheckStatus('ready');
+      } else if (result.state.status === AppUpdateStatus.Downloading) {
+        setUpdateCheckStatus('downloading');
+      } else {
+        setUpdateCheckStatus('idle');
+      }
+
+      if (result.state.info) {
+        onUpdateFound?.(result.state.info);
+      }
+    } catch {
+      setUpdateCheckStatus('error');
+      if (updateCheckTimerRef.current != null) {
+        window.clearTimeout(updateCheckTimerRef.current);
+      }
+      updateCheckTimerRef.current = window.setTimeout(() => {
+        setUpdateCheckStatus('idle');
+        updateCheckTimerRef.current = null;
+      }, 3000);
+    }
+  }, [appVersion, authUser, updateCheckStatus, onUpdateFound]);
+
+  const updateButtonLabel = useMemo(() => {
+    if (
+      updateCheckStatus === 'downloading' &&
+      appUpdateState?.progress?.percent != null &&
+      Number.isFinite(appUpdateState.progress.percent)
+    ) {
+      return `${i18nService.t('updateDownloadingBackground')} ${Math.round(appUpdateState.progress.percent * 100)}%`;
+    }
+    if (updateCheckStatus === 'checking') return i18nService.t('updateChecking');
+    if (updateCheckStatus === 'downloading') return i18nService.t('updateDownloadingBackground');
+    if (updateCheckStatus === 'ready') return i18nService.t('updateReadyTitle');
+    if (updateCheckStatus === 'upToDate') return i18nService.t('updateUpToDate');
+    if (updateCheckStatus === 'error') return i18nService.t('updateCheckFailed');
+    return i18nService.t('checkForUpdate');
+  }, [appUpdateState?.progress?.percent, updateCheckStatus]);
+
+  const handleOpenUserManual = useCallback(() => {
+    void window.electron.shell.openExternal(ABOUT_USER_MANUAL_URL);
+  }, []);
+
+  const handleOpenUserCommunity = useCallback(() => {
+    void window.electron.shell.openExternal(ABOUT_USER_COMMUNITY_URL);
+  }, []);
+
+  const handleOpenServiceTerms = useCallback(() => {
+    void window.electron.shell.openExternal(ABOUT_SERVICE_TERMS_URL);
+  }, []);
+
+  const handleExportLogs = useCallback(async () => {
+    if (isExportingLogs) {
+      return;
+    }
+
+    setError(null);
+    setNoticeMessage(null);
+    setIsExportingLogs(true);
+    try {
+      const result = await window.electron.log.exportZip();
+      if (!result.success) {
+        setError(result.error || i18nService.t('aboutExportLogsFailed'));
+        return;
+      }
+      if (result.canceled) {
+        return;
+      }
+
+      if (result.path) {
+        await window.electron.shell.showItemInFolder(result.path);
+      }
+
+      if ((result.missingEntries?.length ?? 0) > 0) {
+        const missingList = result.missingEntries?.join(', ') || '';
+        setNoticeMessage(`${i18nService.t('aboutExportLogsPartial')}: ${missingList}`);
+      } else {
+        setNoticeMessage(i18nService.t('aboutExportLogsSuccess'));
+      }
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : i18nService.t('aboutExportLogsFailed'));
+    } finally {
+      setIsExportingLogs(false);
+    }
+  }, [isExportingLogs]);
+
   const coworkConfig = useSelector(selectCoworkConfig);
 
-  const [coworkAgentEngine, setCoworkAgentEngine] = useState<CoworkAgentEngine>(
-    coworkConfig.agentEngine || 'openclaw',
+  const [coworkAgentEngine, setCoworkAgentEngine] = useState<CoworkAgentEngine>(coworkConfig.agentEngine || 'openclaw');
+  const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(coworkConfig.memoryEnabled ?? true);
+  const [coworkMemoryLlmJudgeEnabled, setCoworkMemoryLlmJudgeEnabled] = useState<boolean>(coworkConfig.memoryLlmJudgeEnabled ?? false);
+  const [skipMissedJobs, setSkipMissedJobs] = useState<boolean>(coworkConfig.skipMissedJobs ?? true);
+  const [embeddingEnabled, setEmbeddingEnabled] = useState<boolean>(coworkConfig.embeddingEnabled ?? false);
+  const [embeddingProvider, setEmbeddingProvider] = useState<string>(coworkConfig.embeddingProvider ?? 'openai');
+  const [embeddingModel, setEmbeddingModel] = useState<string>(coworkConfig.embeddingModel ?? '');
+  const [embeddingLocalModelPath, setEmbeddingLocalModelPath] = useState<string>(coworkConfig.embeddingLocalModelPath ?? '');
+  const [embeddingVectorWeight, setEmbeddingVectorWeight] = useState<number>(coworkConfig.embeddingVectorWeight ?? 0.7);
+  const [embeddingRemoteBaseUrl, setEmbeddingRemoteBaseUrl] = useState<string>(coworkConfig.embeddingRemoteBaseUrl ?? '');
+  const [embeddingRemoteApiKey, setEmbeddingRemoteApiKey] = useState<string>(coworkConfig.embeddingRemoteApiKey ?? '');
+  const [openClawSessionKeepAlive, setOpenClawSessionKeepAlive] = useState<OpenClawSessionKeepAlive>(
+    coworkConfig.openClawSessionPolicy?.keepAlive || OpenClawSessionKeepAliveValues.ThirtyDays,
   );
-  const [coworkMemoryEnabled, setCoworkMemoryEnabled] = useState<boolean>(
-    coworkConfig.memoryEnabled ?? true,
-  );
-  const [coworkMemoryLlmJudgeEnabled, setCoworkMemoryLlmJudgeEnabled] = useState<boolean>(
-    coworkConfig.memoryLlmJudgeEnabled ?? false,
-  );
-  const [skipMissedJobs, setSkipMissedJobs] = useState<boolean>(
-    coworkConfig.skipMissedJobs ?? false,
-  );
-  const [openClawSessionKeepAlive, setOpenClawSessionKeepAlive] =
-    useState<OpenClawSessionKeepAliveValue>(coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d');
   const [coworkMemoryEntries, setCoworkMemoryEntries] = useState<CoworkUserMemoryEntry[]>([]);
   const [coworkMemoryStats, setCoworkMemoryStats] = useState<CoworkMemoryStats | null>(null);
   const [coworkMemoryListLoading, setCoworkMemoryListLoading] = useState<boolean>(false);
@@ -703,22 +921,45 @@ const Settings: React.FC<SettingsProps> = ({
   const [bootstrapUser, setBootstrapUser] = useState<string>('');
   const [bootstrapSoul, setBootstrapSoul] = useState<string>('');
   const [bootstrapLoaded, setBootstrapLoaded] = useState<boolean>(false);
-  const [openClawEngineStatus, setOpenClawEngineStatus] = useState<OpenClawEngineStatus | null>(
-    null,
-  );
+  const [bootstrapTab, setBootstrapTab] = useState<'IDENTITY.md' | 'SOUL.md' | 'USER.md'>('IDENTITY.md');
+  const [openClawEngineStatus, setOpenClawEngineStatus] = useState<OpenClawEngineStatus | null>(null);
 
   useEffect(() => {
     setCoworkAgentEngine(coworkConfig.agentEngine || 'openclaw');
     setCoworkMemoryEnabled(coworkConfig.memoryEnabled ?? true);
     setCoworkMemoryLlmJudgeEnabled(coworkConfig.memoryLlmJudgeEnabled ?? false);
-    setSkipMissedJobs(coworkConfig.skipMissedJobs ?? false);
-    setOpenClawSessionKeepAlive(coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d');
+    setSkipMissedJobs(coworkConfig.skipMissedJobs ?? true);
+    setEmbeddingEnabled(coworkConfig.embeddingEnabled ?? false);
+    setEmbeddingProvider(coworkConfig.embeddingProvider ?? 'openai');
+    setEmbeddingModel(coworkConfig.embeddingModel ?? '');
+    setEmbeddingLocalModelPath(coworkConfig.embeddingLocalModelPath ?? '');
+    setEmbeddingVectorWeight(coworkConfig.embeddingVectorWeight ?? 0.7);
+    setEmbeddingRemoteBaseUrl(coworkConfig.embeddingRemoteBaseUrl ?? '');
+    setEmbeddingRemoteApiKey(coworkConfig.embeddingRemoteApiKey ?? '');
+    setOpenClawSessionKeepAlive(coworkConfig.openClawSessionPolicy?.keepAlive || OpenClawSessionKeepAliveValues.ThirtyDays);
   }, [
     coworkConfig.agentEngine,
     coworkConfig.memoryEnabled,
     coworkConfig.memoryLlmJudgeEnabled,
+    coworkConfig.openClawSessionPolicy?.keepAlive,
     coworkConfig.skipMissedJobs,
+    coworkConfig.embeddingEnabled,
+    coworkConfig.embeddingProvider,
+    coworkConfig.embeddingModel,
+    coworkConfig.embeddingLocalModelPath,
+    coworkConfig.embeddingVectorWeight,
+    coworkConfig.embeddingRemoteBaseUrl,
+    coworkConfig.embeddingRemoteApiKey,
   ]);
+
+  useEffect(() => () => {
+    if (emailCopiedTimerRef.current != null) {
+      window.clearTimeout(emailCopiedTimerRef.current);
+    }
+    if (updateCheckTimerRef.current != null) {
+      window.clearTimeout(updateCheckTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -746,6 +987,7 @@ const Settings: React.FC<SettingsProps> = ({
       setTheme(config.theme);
       setLanguage(config.language);
       setUseSystemProxy(config.useSystemProxy ?? false);
+      setSqliteAutoBackupEnabled(config.sqliteAutoBackupEnabled === true);
       const savedTestMode = config.app?.testMode ?? false;
       setTestMode(savedTestMode);
       if (savedTestMode) setTestModeUnlocked(true);
@@ -924,6 +1166,28 @@ const Settings: React.FC<SettingsProps> = ({
               baseUrl: config.api.baseUrl,
             },
           }));
+        } else if (normalizedApiBaseUrl.includes('lm-studio') || normalizedApiBaseUrl.includes(':1234')) {
+          setActiveProvider('lm-studio');
+          setProviders(prev => ({
+            ...prev,
+            'lm-studio': {
+              ...prev['lm-studio'],
+              enabled: true,
+              apiKey: config.api.key,
+              baseUrl: config.api.baseUrl
+            }
+          }));
+        } else if (normalizedApiBaseUrl.includes('lm-studio') || normalizedApiBaseUrl.includes(':1234')) {
+          setActiveProvider('lm-studio');
+          setProviders(prev => ({
+            ...prev,
+            'lm-studio': {
+              ...prev['lm-studio'],
+              enabled: true,
+              apiKey: config.api.key,
+              baseUrl: config.api.baseUrl
+            }
+          }));
         }
       }
 
@@ -958,7 +1222,11 @@ const Settings: React.FC<SettingsProps> = ({
                 return {
                   ...model,
                   id,
-                  supportsImage: model.supportsImage ?? false,
+                  supportsImage: ProviderRegistry.resolveModelSupportsImage(
+                    providerKey,
+                    id,
+                    model.supportsImage,
+                  ),
                 };
               });
               return [
@@ -1365,12 +1633,107 @@ const Settings: React.FC<SettingsProps> = ({
     setMinimaxOAuthPhase({ kind: 'idle' });
   };
 
-  const hasCoworkConfigChanges =
-    coworkAgentEngine !== coworkConfig.agentEngine ||
-    coworkMemoryEnabled !== coworkConfig.memoryEnabled ||
-    coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled ||
-    skipMissedJobs !== (coworkConfig.skipMissedJobs ?? false) ||
-    openClawSessionKeepAlive !== (coworkConfig.openClawSessionPolicy?.keepAlive ?? '30d');
+  // Sync the persisted ChatGPT login state into local UI state on mount and
+  // whenever the OpenAI provider tab becomes active. Also reconciles stale
+  // providers config (e.g. auth.json deleted externally).
+  useEffect(() => {
+    let cancelled = false;
+    if (activeProvider !== 'openai') return;
+    void window.electron.openaiCodexOAuth.status().then((status) => {
+      if (cancelled) return;
+      if (status.loggedIn) {
+        setOpenaiOAuthStatus({ loggedIn: true, email: status.email ?? undefined });
+      } else {
+        setOpenaiOAuthStatus({ loggedIn: false });
+        setProviders(prev => {
+          if (prev.openai.authType !== 'oauth') return prev;
+          return { ...prev, openai: { ...prev.openai, authType: 'apikey' } };
+        });
+      }
+    }).catch(() => {
+      if (!cancelled) setOpenaiOAuthStatus({ loggedIn: false });
+    });
+    return () => { cancelled = true; };
+  }, [activeProvider]);
+
+  const persistOpenAIProvidersConfigInBackground = useCallback((nextProviders: ProvidersConfig) => {
+    void configService.updateConfig({ providers: nextProviders }).catch((saveError) => {
+      console.error('[Settings] failed to save OpenAI OAuth provider state:', saveError);
+      setError(i18nService.t('failedToSaveSettings'));
+    });
+  }, []);
+
+  const handleOpenAIOAuthLogin = async () => {
+    setOpenaiOAuthPhase({ kind: 'pending' });
+    try {
+      const result = await window.electron.openaiCodexOAuth.start();
+      if (!result.success) {
+        setOpenaiOAuthPhase({ kind: 'error', message: result.error });
+        return;
+      }
+      const nextProviders: ProvidersConfig = {
+        ...providers,
+        openai: {
+          ...providers.openai,
+          enabled: true,
+          authType: 'oauth',
+        },
+      };
+      setProviders(nextProviders);
+      setOpenaiOAuthStatus({ loggedIn: true, email: result.email ?? undefined });
+      setOpenaiOAuthPhase({ kind: 'success', email: result.email ?? undefined });
+      persistOpenAIProvidersConfigInBackground(nextProviders);
+      setTimeout(() => setOpenaiOAuthPhase({ kind: 'idle' }), 1500);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setOpenaiOAuthPhase({ kind: 'error', message });
+    }
+  };
+
+  const handleCancelOpenAIOAuthLogin = async () => {
+    try {
+      await window.electron.openaiCodexOAuth.cancel();
+    } catch {
+      /* ignore — we still want to reset the UI */
+    }
+    setOpenaiOAuthPhase({ kind: 'idle' });
+  };
+
+  const handleOpenAIOAuthLogout = async () => {
+    const nextOpenAIProvider = {
+      ...providers.openai,
+      enabled: providers.openai.apiKey.trim().length > 0,
+      authType: 'apikey' as const,
+    };
+    const nextProviders: ProvidersConfig = {
+      ...providers,
+      openai: {
+        ...nextOpenAIProvider,
+      },
+    };
+    setProviders(nextProviders);
+    setOpenaiOAuthStatus({ loggedIn: false });
+    setOpenaiOAuthPhase({ kind: 'idle' });
+    persistOpenAIProvidersConfigInBackground(nextProviders);
+    try {
+      await window.electron.openaiCodexOAuth.logout();
+    } catch {
+      /* ignore — file may already be gone */
+    }
+  };
+
+  const hasCoworkConfigChanges = coworkAgentEngine !== coworkConfig.agentEngine
+    || coworkMemoryEnabled !== coworkConfig.memoryEnabled
+    || coworkMemoryLlmJudgeEnabled !== coworkConfig.memoryLlmJudgeEnabled
+    || skipMissedJobs !== (coworkConfig.skipMissedJobs ?? true)
+    || openClawSessionKeepAlive !== (coworkConfig.openClawSessionPolicy?.keepAlive || OpenClawSessionKeepAliveValues.ThirtyDays)
+    || embeddingEnabled !== (coworkConfig.embeddingEnabled ?? false)
+    || embeddingProvider !== (coworkConfig.embeddingProvider ?? 'openai')
+    || embeddingModel !== (coworkConfig.embeddingModel ?? '')
+    || embeddingLocalModelPath !== (coworkConfig.embeddingLocalModelPath ?? '')
+    || embeddingVectorWeight !== (coworkConfig.embeddingVectorWeight ?? 0.7)
+    || embeddingRemoteBaseUrl !== (coworkConfig.embeddingRemoteBaseUrl ?? '')
+    || embeddingRemoteApiKey !== (coworkConfig.embeddingRemoteApiKey ?? '');
   const isOpenClawAgentEngine = coworkAgentEngine === 'openclaw';
 
   const openClawProgressPercent = useMemo(() => {
@@ -1432,37 +1795,20 @@ const Settings: React.FC<SettingsProps> = ({
     void loadCoworkMemoryData();
   }, [activeTab, loadCoworkMemoryData]);
 
-  /**
-   * Detect OpenClaw default template content and return empty string.
-   * Templates contain YAML frontmatter and specific marker phrases.
-   */
-  const stripDefaultTemplate = (content: string): string => {
-    if (!content.trim()) return '';
-    const TEMPLATE_MARKERS = [
-      'Fill this in during your first conversation',
-      "You're not a chatbot. You're becoming someone",
-      "Learn about the person you're helping",
-    ];
-    if (TEMPLATE_MARKERS.some(m => content.includes(m))) return '';
-    return content;
-  };
-
   useEffect(() => {
     if (activeTab !== 'coworkAgent') return;
-    if (!bootstrapLoaded) {
-      void (async () => {
-        const [identity, user, soul] = await Promise.all([
-          coworkService.readBootstrapFile('IDENTITY.md'),
-          coworkService.readBootstrapFile('USER.md'),
-          coworkService.readBootstrapFile('SOUL.md'),
-        ]);
-        setBootstrapIdentity(stripDefaultTemplate(identity));
-        setBootstrapUser(stripDefaultTemplate(user));
-        setBootstrapSoul(stripDefaultTemplate(soul));
-        setBootstrapLoaded(true);
-      })();
-    }
-  }, [activeTab, bootstrapLoaded]);
+    void (async () => {
+      const [identity, user, soul] = await Promise.all([
+        coworkService.readBootstrapFile('IDENTITY.md'),
+        coworkService.readBootstrapFile('USER.md'),
+        coworkService.readBootstrapFile('SOUL.md'),
+      ]);
+      setBootstrapIdentity(identity);
+      setBootstrapUser(user);
+      setBootstrapSoul(soul);
+      setBootstrapLoaded(true);
+    })();
+  }, [activeTab]);
 
   const resetCoworkMemoryEditor = () => {
     setCoworkMemoryEditingId(null);
@@ -1694,6 +2040,7 @@ const Settings: React.FC<SettingsProps> = ({
         theme,
         language,
         useSystemProxy,
+        sqliteAutoBackupEnabled,
         shortcuts,
         app: {
           ...configService.getConfig().app,
@@ -1711,28 +2058,25 @@ const Settings: React.FC<SettingsProps> = ({
       let apiKeyToUse = primaryProvider.apiKey;
       let baseUrlToUse = primaryProvider.baseUrl;
 
+
       apiService.setConfig({
         apiKey: apiKeyToUse,
         baseUrl: baseUrlToUse,
       });
 
       // 更新 Redux store 中的可用模型列表
-      const allModels: {
-        id: string;
-        name: string;
-        provider?: string;
-        providerKey?: string;
-        supportsImage?: boolean;
-      }[] = [];
+      const allModels: { id: string; name: string; provider?: string; providerKey?: string; openClawProviderId?: string; supportsImage?: boolean }[] = [];
       Object.entries(normalizedProviders).forEach(([providerName, config]) => {
         if (config.enabled && config.models) {
+          const openClawProviderId = getOpenClawProviderIdForConfig(providerName, config);
           config.models.forEach(model => {
             allModels.push({
               id: model.id,
               name: model.name,
               provider: getProviderDisplayName(providerName, config),
               providerKey: providerName,
-              supportsImage: model.supportsImage ?? false,
+              openClawProviderId,
+              supportsImage: resolveModelSupportsImageForProvider(providerName, model),
             });
           });
         }
@@ -1745,6 +2089,13 @@ const Settings: React.FC<SettingsProps> = ({
           memoryEnabled: coworkMemoryEnabled,
           memoryLlmJudgeEnabled: coworkMemoryLlmJudgeEnabled,
           skipMissedJobs,
+          embeddingEnabled,
+          embeddingProvider,
+          embeddingModel,
+          embeddingLocalModelPath,
+          embeddingVectorWeight,
+          embeddingRemoteBaseUrl,
+          embeddingRemoteApiKey,
         });
         if (!updated) {
           throw new Error(i18nService.t('coworkConfigSaveFailed'));
@@ -1757,7 +2108,7 @@ const Settings: React.FC<SettingsProps> = ({
         }
       }
 
-      // Save bootstrap files (IDENTITY.md, USER.md, SOUL.md) only if loaded
+      // Save bootstrap files (IDENTITY.md, USER.md, SOUL.md) only if loaded.
       if (bootstrapLoaded) {
         const results = await Promise.all([
           coworkService.writeBootstrapFile('IDENTITY.md', bootstrapIdentity),
@@ -1772,7 +2123,10 @@ const Settings: React.FC<SettingsProps> = ({
       // Sync IM gateway config (regenerate openclaw.json and restart gateway if running).
       // This is done on every save regardless of activeTab, because the user may have
       // edited IM config then switched tabs before clicking Save.
-      await imService.saveAndSyncConfig();
+      const syncSucceeded = await imService.saveAndSyncConfig();
+      if (!syncSucceeded) {
+        throw new Error(i18nService.t('settingsSavedButOpenClawSyncFailed'));
+      }
 
       didSaveRef.current = true;
       onClose();
@@ -1867,10 +2221,10 @@ const Settings: React.FC<SettingsProps> = ({
   const handleSaveNewModel = () => {
     const modelId = newModelId.trim();
 
-    if (activeProvider === 'ollama') {
-      // For Ollama, only the model name (stored as modelId) is required
+    if (activeProvider === 'ollama' || activeProvider === 'lm-studio') {
+      // For Ollama/LM Studio, only the model name (stored as modelId) is required
       if (!modelId) {
-        setModelFormError(i18nService.t('ollamaModelNameRequired'));
+        setModelFormError(i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioModelNameRequired' : 'ollamaModelNameRequired'));
         return;
       }
     } else {
@@ -1882,12 +2236,9 @@ const Settings: React.FC<SettingsProps> = ({
     }
 
     // For Ollama, auto-fill display name from modelId if not provided
-    const modelName =
-      activeProvider === 'ollama'
-        ? newModelName.trim() && newModelName.trim() !== modelId
-          ? newModelName.trim()
-          : modelId
-        : newModelName.trim();
+    const modelName = activeProvider === 'ollama' || activeProvider === 'lm-studio'
+      ? (newModelName.trim() && newModelName.trim() !== modelId ? newModelName.trim() : modelId)
+      : newModelName.trim();
 
     const currentModels = providers[activeProvider].models ?? [];
     const duplicateModel = currentModels.find(
@@ -1901,7 +2252,11 @@ const Settings: React.FC<SettingsProps> = ({
     const nextModel = {
       id: modelId,
       name: modelName,
-      supportsImage: newModelSupportsImage,
+      supportsImage: ProviderRegistry.resolveModelSupportsImage(
+        activeProvider,
+        modelId,
+        newModelSupportsImage,
+      ),
     };
     const updatedModels =
       isEditingModel && editingModelId
@@ -1966,10 +2321,8 @@ const Settings: React.FC<SettingsProps> = ({
     setIsTestResultModalOpen(false);
     setTestResult(null);
 
-    // Check if provider has valid authentication (API Key or OAuth for Qwen)
-    const hasValidAuth =
-      providerConfig.apiKey ||
-      (testingProvider === 'qwen' && (providerConfig as any).oauthCredentials);
+    const hasValidAuth = providerConfig.apiKey;
+
 
     if (providerRequiresApiKey(testingProvider) && !hasValidAuth) {
       showTestResultModal(
@@ -2158,7 +2511,7 @@ const Settings: React.FC<SettingsProps> = ({
             baseUrl: resolveBaseUrl(providerKey as ProviderType, providerConfig.baseUrl, apiFormat),
             apiFormat,
             codingPlanEnabled: (providerConfig as ProviderConfig).codingPlanEnabled,
-            models: providerConfig.models,
+            models: normalizeModels(providerKey, providerConfig.models),
           },
         ] as const;
       }),
@@ -2177,10 +2530,10 @@ const Settings: React.FC<SettingsProps> = ({
     };
   };
 
-  const normalizeModels = (models?: Model[]) =>
+  const normalizeModels = (providerKey: string, models?: Model[]) =>
     models?.map(model => ({
       ...model,
-      supportsImage: model.supportsImage ?? false,
+      supportsImage: resolveModelSupportsImageForProvider(providerKey, model),
     }));
 
   const DEFAULT_EXPORT_PASSWORD = EXPORT_PASSWORD;
@@ -2225,34 +2578,40 @@ const Settings: React.FC<SettingsProps> = ({
 
     try {
       const raw = await file.text();
+      console.log(`[Settings] importing providers from file: ${file.name}, size: ${file.size}`);
       let payload: ProvidersImportPayload;
       try {
         payload = JSON.parse(raw) as ProvidersImportPayload;
       } catch {
+        console.warn('[Settings] import failed: invalid JSON in file');
         setError(i18nService.t('invalidProvidersFile'));
         return;
       }
 
       if (!payload || payload.type !== EXPORT_FORMAT_TYPE || !payload.providers) {
+        console.warn(`[Settings] import failed: invalid format, type=${payload?.type}, hasProviders=${!!payload?.providers}`);
         setError(i18nService.t('invalidProvidersFile'));
         return;
       }
 
       // Check if it's version 2 (password-based encryption)
       if (payload.version === 2 && payload.encryption?.keySource === 'password') {
+        console.log('[Settings] import: detected v2 password-based encryption');
         await processImportPayloadWithPassword(payload);
         return;
       }
 
       // Version 1 (legacy local-store key) - try to decrypt with local key
       if (payload.version === 1) {
+        console.log('[Settings] import: detected v1 local-key encryption');
         await processImportPayloadWithLocalKey(payload);
         return;
       }
 
+      console.warn(`[Settings] import failed: unsupported version=${payload.version}`);
       setError(i18nService.t('invalidProvidersFile'));
     } catch (err) {
-      console.error('Failed to import providers:', err);
+      console.error('[Settings] import failed:', err);
       setError(i18nService.t('importProvidersFailed'));
     }
   };
@@ -2260,6 +2619,8 @@ const Settings: React.FC<SettingsProps> = ({
   const processImportPayloadWithLocalKey = async (payload: ProvidersImportPayload) => {
     setIsImportingProviders(true);
     try {
+      const fileKeys = Object.keys(payload.providers ?? {});
+      console.log(`[Settings] v1 import: processing ${fileKeys.length} providers from file`);
       const providerUpdates: Partial<ProvidersConfig> = {};
       let hadDecryptFailure = false;
       for (const providerKey of providerKeys) {
@@ -2274,50 +2635,39 @@ const Settings: React.FC<SettingsProps> = ({
         } else if (providerData.apiKey && typeof providerData.apiKey === 'object') {
           try {
             apiKey = await decryptSecret(providerData.apiKey as EncryptedPayload);
+            console.log(`[Settings] v1 import: decrypted key for ${providerKey}`);
           } catch (error) {
             hadDecryptFailure = true;
-            console.warn(`Failed to decrypt provider key for ${providerKey}`, error);
+            console.warn(`[Settings] v1 import: failed to decrypt key for ${providerKey}`, error);
           }
         } else if (
           typeof providerData.apiKeyEncrypted === 'string' &&
           typeof providerData.apiKeyIv === 'string'
         ) {
           try {
-            apiKey = await decryptSecret({
-              encrypted: providerData.apiKeyEncrypted,
-              iv: providerData.apiKeyIv,
-            });
+            apiKey = await decryptSecret({ encrypted: providerData.apiKeyEncrypted, iv: providerData.apiKeyIv });
+            console.log(`[Settings] v1 import: decrypted key for ${providerKey}`);
           } catch (error) {
             hadDecryptFailure = true;
-            console.warn(`Failed to decrypt provider key for ${providerKey}`, error);
+            console.warn(`[Settings] v1 import: failed to decrypt key for ${providerKey}`, error);
           }
         }
 
-        const models = normalizeModels(providerData.models);
+        const models = normalizeModels(providerKey, providerData.models);
+        const existing = providers[providerKey];
 
         providerUpdates[providerKey] = {
-          enabled:
-            typeof providerData.enabled === 'boolean'
-              ? providerData.enabled
-              : providers[providerKey].enabled,
-          apiKey: apiKey ?? providers[providerKey].apiKey,
-          baseUrl:
-            typeof providerData.baseUrl === 'string'
-              ? providerData.baseUrl
-              : providers[providerKey].baseUrl,
-          apiFormat: getEffectiveApiFormat(
-            providerKey,
-            providerData.apiFormat ?? providers[providerKey].apiFormat,
-          ),
-          codingPlanEnabled:
-            typeof providerData.codingPlanEnabled === 'boolean'
-              ? providerData.codingPlanEnabled
-              : (providers[providerKey] as ProviderConfig).codingPlanEnabled,
-          models: models ?? providers[providerKey].models,
+          enabled: typeof providerData.enabled === 'boolean' ? providerData.enabled : existing?.enabled ?? false,
+          apiKey: apiKey ?? existing?.apiKey ?? '',
+          baseUrl: typeof providerData.baseUrl === 'string' ? providerData.baseUrl : existing?.baseUrl ?? '',
+          apiFormat: getEffectiveApiFormat(providerKey, providerData.apiFormat ?? existing?.apiFormat),
+          codingPlanEnabled: typeof providerData.codingPlanEnabled === 'boolean' ? providerData.codingPlanEnabled : (existing as ProviderConfig)?.codingPlanEnabled,
+          models: models ?? existing?.models,
         };
       }
 
       if (Object.keys(providerUpdates).length === 0) {
+        console.warn(`[Settings] v1 import failed: no matching providers found, file keys: ${fileKeys.join(', ')}`);
         setError(i18nService.t('invalidProvidersFile'));
         return;
       }
@@ -2334,14 +2684,14 @@ const Settings: React.FC<SettingsProps> = ({
       });
       setIsTestResultModalOpen(false);
       setTestResult(null);
+      console.log(`[Settings] v1 import complete: updated ${Object.keys(providerUpdates).length} providers`);
       if (hadDecryptFailure) {
         setNoticeMessage(i18nService.t('decryptProvidersPartial'));
       }
     } catch (err) {
-      console.error('Failed to import providers:', err);
-      const isDecryptError =
-        err instanceof Error &&
-        (err.message === 'Invalid encrypted payload' || err.name === 'OperationError');
+      console.error('[Settings] v1 import failed:', err);
+      const isDecryptError = err instanceof Error
+        && (err.message === 'Invalid encrypted payload' || err.name === 'OperationError');
       const message = isDecryptError
         ? i18nService.t('decryptProvidersFailed')
         : i18nService.t('importProvidersFailed');
@@ -2359,6 +2709,8 @@ const Settings: React.FC<SettingsProps> = ({
     setIsImportingProviders(true);
 
     try {
+      const fileKeys = Object.keys(payload.providers);
+      console.log(`[Settings] v2 import: processing ${fileKeys.length} providers from file`);
       const providerUpdates: Partial<ProvidersConfig> = {};
       let hadDecryptFailure = false;
 
@@ -2377,38 +2729,29 @@ const Settings: React.FC<SettingsProps> = ({
             // Version 2 password-based encryption
             try {
               apiKey = await decryptWithPassword(apiKeyObj, DEFAULT_EXPORT_PASSWORD);
+              console.log(`[Settings] v2 import: decrypted key for ${providerKey}`);
             } catch (error) {
               hadDecryptFailure = true;
-              console.warn(`Failed to decrypt provider key for ${providerKey}`, error);
+              console.warn(`[Settings] v2 import: failed to decrypt key for ${providerKey}`, error);
             }
           }
         }
 
-        const models = normalizeModels(providerData.models);
+        const models = normalizeModels(providerKey, providerData.models);
+        const existing = providers[providerKey];
 
         providerUpdates[providerKey] = {
-          enabled:
-            typeof providerData.enabled === 'boolean'
-              ? providerData.enabled
-              : providers[providerKey].enabled,
-          apiKey: apiKey ?? providers[providerKey].apiKey,
-          baseUrl:
-            typeof providerData.baseUrl === 'string'
-              ? providerData.baseUrl
-              : providers[providerKey].baseUrl,
-          apiFormat: getEffectiveApiFormat(
-            providerKey,
-            providerData.apiFormat ?? providers[providerKey].apiFormat,
-          ),
-          codingPlanEnabled:
-            typeof providerData.codingPlanEnabled === 'boolean'
-              ? providerData.codingPlanEnabled
-              : (providers[providerKey] as ProviderConfig).codingPlanEnabled,
-          models: models ?? providers[providerKey].models,
+          enabled: typeof providerData.enabled === 'boolean' ? providerData.enabled : existing?.enabled ?? false,
+          apiKey: apiKey ?? existing?.apiKey ?? '',
+          baseUrl: typeof providerData.baseUrl === 'string' ? providerData.baseUrl : existing?.baseUrl ?? '',
+          apiFormat: getEffectiveApiFormat(providerKey, providerData.apiFormat ?? existing?.apiFormat),
+          codingPlanEnabled: typeof providerData.codingPlanEnabled === 'boolean' ? providerData.codingPlanEnabled : (existing as ProviderConfig)?.codingPlanEnabled,
+          models: models ?? existing?.models,
         };
       }
 
       if (Object.keys(providerUpdates).length === 0) {
+        console.warn(`[Settings] v2 import failed: no matching providers found, file keys: ${fileKeys.join(', ')}`);
         setError(i18nService.t('invalidProvidersFile'));
         return;
       }
@@ -2420,6 +2763,7 @@ const Settings: React.FC<SettingsProps> = ({
 
       if (!anyKeyDecrypted && hadDecryptFailure) {
         // All decryptions failed - likely wrong password
+        console.warn('[Settings] v2 import failed: all key decryptions failed, likely wrong password');
         setError(i18nService.t('decryptProvidersFailed'));
         return;
       }
@@ -2436,14 +2780,14 @@ const Settings: React.FC<SettingsProps> = ({
       });
       setIsTestResultModalOpen(false);
       setTestResult(null);
+      console.log(`[Settings] v2 import complete: updated ${Object.keys(providerUpdates).length} providers`);
       if (hadDecryptFailure) {
         setNoticeMessage(i18nService.t('decryptProvidersPartial'));
       }
     } catch (err) {
-      console.error('Failed to import providers:', err);
-      const isDecryptError =
-        err instanceof Error &&
-        (err.message === 'Invalid encrypted payload' || err.name === 'OperationError');
+      console.error('[Settings] v2 import failed:', err);
+      const isDecryptError = err instanceof Error
+        && (err.message === 'Invalid encrypted payload' || err.name === 'OperationError');
       const message = isDecryptError
         ? i18nService.t('decryptProvidersFailed')
         : i18nService.t('importProvidersFailed');
@@ -2640,12 +2984,44 @@ const Settings: React.FC<SettingsProps> = ({
                     setUseSystemProxy(prev => !prev);
                   }}
                   className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                    useSystemProxy ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
+                    useSystemProxy
+                      ? 'bg-primary'
+                      : 'bg-gray-300 dark:bg-gray-600'
                   }`}
                 >
                   <span
                     className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      useSystemProxy ? 'translate-x-6' : 'translate-x-1'
+                      sqliteAutoBackupEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">
+                {i18nService.t('sqliteAutoBackupEnabled')}
+              </h4>
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm text-secondary">
+                  {i18nService.t('sqliteAutoBackupEnabledDescription')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={sqliteAutoBackupEnabled}
+                  onClick={() => {
+                    setSqliteAutoBackupEnabled((prev) => !prev);
+                  }}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                    sqliteAutoBackupEnabled
+                      ? 'bg-primary'
+                      : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      sqliteAutoBackupEnabled ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
                 </button>
@@ -2857,15 +3233,8 @@ const Settings: React.FC<SettingsProps> = ({
                         <circle cx="52" cy="24" r="8" fill={c3} opacity="0.8" />
                         <rect x="32" y="34" width="40" height="4" rx="2" fill={c1} opacity="0.6" />
                       </svg>
-                      <span
-                        className="text-[10px] font-medium truncate w-full text-center"
-                        style={{
-                          color: isSelected
-                            ? 'var(--lobster-primary)'
-                            : 'var(--lobster-text-primary)',
-                        }}
-                      >
-                        {t.meta.name}
+                      <span className="text-[10px] font-medium truncate w-full text-center" style={{ color: isSelected ? 'var(--lobster-primary)' : 'var(--lobster-text-primary)' }}>
+                        {i18nService.t('theme-name-' + t.meta.id) || t.meta.name}
                       </span>
                     </button>
                   );
@@ -3033,6 +3402,23 @@ const Settings: React.FC<SettingsProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Section 3: Embedding / Vector Memory Search */}
+            <EmbeddingSettingsSection
+              embeddingEnabled={embeddingEnabled}
+              embeddingProvider={embeddingProvider}
+              embeddingModel={embeddingModel}
+              embeddingVectorWeight={embeddingVectorWeight}
+              embeddingRemoteBaseUrl={embeddingRemoteBaseUrl}
+              embeddingRemoteApiKey={embeddingRemoteApiKey}
+              onEmbeddingEnabledChange={setEmbeddingEnabled}
+              onEmbeddingProviderChange={setEmbeddingProvider}
+              onEmbeddingModelChange={setEmbeddingModel}
+              onEmbeddingVectorWeightChange={setEmbeddingVectorWeight}
+              onEmbeddingRemoteBaseUrlChange={setEmbeddingRemoteBaseUrl}
+              onEmbeddingRemoteApiKeyChange={setEmbeddingRemoteApiKey}
+            />
+
           </div>
         );
 
@@ -3472,8 +3858,165 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               )}
 
+              {/* OpenAI ChatGPT (Codex) OAuth auth section */}
+              {activeProvider === 'openai' && (
+                <div className="space-y-3">
+                  {/* Auth type radio cards */}
+                  <div>
+                    <p className="text-xs font-medium text-foreground mb-2">
+                      {i18nService.t('openaiAuthMethodLabel')}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProviders(prev => ({
+                            ...prev,
+                            openai: {
+                              ...prev.openai,
+                              authType: 'apikey',
+                            },
+                          }));
+                          setOpenaiOAuthPhase({ kind: 'idle' });
+                        }}
+                        className={`flex-1 p-3 rounded-xl border-2 text-left transition-all ${!openaiIsOAuthMode ? 'border-primary bg-primary/5' : 'border-border opacity-60 hover:opacity-80'}`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <KeyIcon className="h-4 w-4 text-foreground mt-0.5 shrink-0" />
+                          {!openaiIsOAuthMode && <CheckCircleIcon className="h-4 w-4 text-primary shrink-0" />}
+                        </div>
+                        <p className="text-xs font-semibold text-foreground mt-1.5">{i18nService.t('openaiOAuthTabApiKey')}</p>
+                        <p className="text-[11px] text-secondary mt-0.5 leading-relaxed">{i18nService.t('openaiAuthApiKeyDesc')}</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProviders(prev => ({
+                          ...prev,
+                          openai: {
+                            ...prev.openai,
+                            authType: 'oauth',
+                          },
+                        }))}
+                        className={`flex-1 p-3 rounded-xl border-2 text-left transition-all ${openaiIsOAuthMode ? 'border-primary bg-primary/5' : 'border-border opacity-60 hover:opacity-80'}`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <ShieldCheckIcon className="h-4 w-4 text-foreground mt-0.5 shrink-0" />
+                          {openaiIsOAuthMode && <CheckCircleIcon className="h-4 w-4 text-primary shrink-0" />}
+                        </div>
+                        <p className="text-xs font-semibold text-foreground mt-1.5">{i18nService.t('openaiOAuthTabOAuth')}</p>
+                        <p className="text-[11px] text-secondary mt-0.5 leading-relaxed">{i18nService.t('openaiAuthOAuthDesc')}</p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* OAuth mode UI */}
+                  {openaiIsOAuthMode && (
+                    <div className="space-y-2 min-h-[68px]">
+                      {/* Idle + already logged in */}
+                      {openaiOAuthPhase.kind === 'idle' && openaiOAuthStatus?.loggedIn && (
+                        <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20 space-y-2">
+                          <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+                            {i18nService.t('openaiOAuthLoggedIn')}
+                            {openaiOAuthStatus.email ? ` (${openaiOAuthStatus.email})` : ''}
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleOpenAIOAuthLogin}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised transition-colors"
+                            >
+                              {i18nService.t('openaiOAuthRelogin')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { void handleOpenAIOAuthLogout(); }}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 transition-colors"
+                            >
+                              {i18nService.t('openaiOAuthLogout')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Idle + not logged in — show login CTA */}
+                      {openaiOAuthPhase.kind === 'idle' && openaiOAuthStatus && !openaiOAuthStatus.loggedIn && (
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={handleOpenAIOAuthLogin}
+                            className="w-full py-2 text-xs font-medium rounded-xl bg-primary text-white hover:bg-primary-hover transition-colors"
+                          >
+                            {i18nService.t('openaiOAuthLogin')}
+                          </button>
+                          <p className="text-[11px] text-secondary">
+                            {i18nService.t('openaiOAuthHint')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Pending — browser opened, waiting for callback */}
+                      {openaiOAuthPhase.kind === 'pending' && (
+                        <div className="p-3 rounded-xl bg-surface-inset border border-border space-y-2">
+                          <p className="text-xs text-foreground font-medium">
+                            {i18nService.t('openaiOAuthOpenBrowserHint')}
+                          </p>
+                          <p className="text-[11px] text-secondary">
+                            {i18nService.t('openaiOAuthStatusPending')}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => { void handleCancelOpenAIOAuthLogin(); }}
+                            className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised transition-colors"
+                          >
+                            {i18nService.t('openaiOAuthCancel')}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Success */}
+                      {openaiOAuthPhase.kind === 'success' && (
+                        <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20">
+                          <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+                            {i18nService.t('openaiOAuthStatusSuccess')}
+                            {openaiOAuthPhase.email ? ` (${openaiOAuthPhase.email})` : ''}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Error */}
+                      {openaiOAuthPhase.kind === 'error' && (
+                        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 space-y-2">
+                          <p className="text-xs text-red-600 dark:text-red-400 font-medium">
+                            {i18nService.t('openaiOAuthStatusError')}
+                          </p>
+                          <p className="text-[11px] text-red-600/80 dark:text-red-400/80 break-words">
+                            {openaiOAuthPhase.message}
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleOpenAIOAuthLogin}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors"
+                            >
+                              {i18nService.t('openaiOAuthRelogin')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOpenaiOAuthPhase({ kind: 'idle' })}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-border text-foreground hover:bg-surface-raised transition-colors"
+                            >
+                              {i18nService.t('openaiOAuthCancel')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Standard API key section for non-MiniMax providers */}
-              {providerRequiresApiKey(activeProvider) && activeProvider !== 'minimax' && (
+              {providerRequiresApiKey(activeProvider) && activeProvider !== 'minimax' && !(activeProvider === 'openai' && openaiIsOAuthMode) && (
                 <div>
                   {/* Standard API Key input for non-Qwen providers */}
                   {activeProvider !== 'qwen' && (
@@ -3788,95 +4331,93 @@ const Settings: React.FC<SettingsProps> = ({
                           if (cpUrl) return cpUrl;
                         }
                         return providers[activeProvider].baseUrl;
-                      })()}
-                      onChange={e =>
-                        handleProviderConfigChange(activeProvider, 'baseUrl', e.target.value)
-                      }
-                      readOnly={isBaseUrlLocked}
-                      aria-readonly={isBaseUrlLocked}
-                      className={`block w-full rounded-xl bg-claude-surfaceInset dark:bg-claude-darkSurfaceInset dark:border-claude-darkBorder border-claude-border border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-8 text-xs ${isBaseUrlLocked ? 'cursor-default opacity-70' : ''}`}
-                      placeholder={
-                        activeProvider === 'qwen'
-                          ? 'https://dashscope.aliyuncs.com/apps/anthropic'
-                          : getProviderDefaultBaseUrl(
-                              activeProvider,
-                              getEffectiveApiFormat(
-                                activeProvider,
-                                providers[activeProvider].apiFormat,
-                              ),
-                            ) ||
-                            defaultConfig.providers?.[activeProvider]?.baseUrl ||
-                            i18nService.t('baseUrlPlaceholder')
-                      }
-                    />
-                    {providers[activeProvider].baseUrl && !isBaseUrlLocked && (
-                      <div className="absolute right-2 inset-y-0 flex items-center">
-                        <button
-                          type="button"
-                          onClick={() => handleProviderConfigChange(activeProvider, 'baseUrl', '')}
-                          className="p-0.5 rounded text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-accent transition-colors"
-                          title={i18nService.t('clear') || 'Clear'}
-                        >
-                          <XCircleIconSolid className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {isCustomProvider(activeProvider) && (
-                    <div className="mt-1.5 space-y-0.5 text-[11px] text-secondary">
-                      <p>
-                        <span className="text-sm text-muted mr-1">•</span>
-                        {i18nService.t('baseUrlHint1')}
-                        <code className="ml-1 text-primary break-all">
-                          {i18nService.t('baseUrlHintExample1')}
-                        </code>
-                      </p>
-                      <p>
-                        <span className="text-sm text-muted mr-1">•</span>
-                        {i18nService.t('baseUrlHint2')}
-                        <code className="ml-1 text-primary break-all">
-                          {i18nService.t('baseUrlHintExample2')}
-                        </code>
-                      </p>
-                    </div>
-                  )}
-                  {/* GLM Coding Plan 提示 */}
-                  {activeProvider === 'zhipu' && providers.zhipu.codingPlanEnabled && (
-                    <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
-                      <p className="text-[11px] text-primary dark:text-primary">
-                        <span className="font-medium">GLM Coding Plan:</span>{' '}
-                        {i18nService.t('zhipuCodingPlanEndpointHint')}
-                      </p>
-                    </div>
-                  )}
-                  {/* Qwen Coding Plan 提示 */}
-                  {activeProvider === 'qwen' && providers.qwen.codingPlanEnabled && (
-                    <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
-                      <p className="text-[11px] text-primary dark:text-primary">
-                        <span className="font-medium">Coding Plan:</span>{' '}
-                        {i18nService.t('qwenCodingPlanEndpointHint')}
-                      </p>
-                    </div>
-                  )}
-                  {/* Volcengine Coding Plan 提示 */}
-                  {activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled && (
-                    <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
-                      <p className="text-[11px] text-primary dark:text-primary">
-                        <span className="font-medium">Coding Plan:</span>{' '}
-                        {i18nService.t('volcengineCodingPlanEndpointHint')}
-                      </p>
-                    </div>
-                  )}
-                  {/* Moonshot Coding Plan 提示 */}
-                  {activeProvider === 'moonshot' && providers.moonshot.codingPlanEnabled && (
-                    <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
-                      <p className="text-[11px] text-primary dark:text-primary">
-                        <span className="font-medium">Coding Plan:</span>{' '}
-                        {i18nService.t('moonshotCodingPlanEndpointHint')}
-                      </p>
+                      })()
+                    }
+                    onChange={(e) => handleProviderConfigChange(activeProvider, 'baseUrl', e.target.value)}
+                    disabled={isBaseUrlLocked}
+                    className={`block w-full rounded-xl bg-claude-surfaceInset dark:bg-claude-darkSurfaceInset dark:border-claude-darkBorder border-claude-border border focus:border-claude-accent focus:ring-1 focus:ring-claude-accent/30 dark:text-claude-darkText text-claude-text px-3 py-2 pr-8 text-xs ${isBaseUrlLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    placeholder={
+                      activeProvider === 'qwen'
+                        ? 'https://dashscope.aliyuncs.com/apps/anthropic'
+                        : getProviderDefaultBaseUrl(activeProvider, getEffectiveApiFormat(activeProvider, providers[activeProvider].apiFormat)) || defaultConfig.providers?.[activeProvider]?.baseUrl || i18nService.t('baseUrlPlaceholder')
+                    }
+                  />
+                  {providers[activeProvider].baseUrl && !isBaseUrlLocked && (
+                    <div className="absolute right-2 inset-y-0 flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => handleProviderConfigChange(activeProvider, 'baseUrl', '')}
+                        className="p-0.5 rounded text-claude-textSecondary dark:text-claude-darkTextSecondary hover:text-claude-accent transition-colors"
+                        title={i18nService.t('clear') || 'Clear'}
+                      >
+                        <XCircleIconSolid className="h-4 w-4" />
+                      </button>
                     </div>
                   )}
                 </div>
+                {isCustomProvider(activeProvider) && (
+                <div className="mt-1.5 space-y-0.5 text-[11px] text-secondary">
+                  <p>
+                    <span className="text-sm text-muted mr-1">•</span>
+                    {i18nService.t('baseUrlHint1')}
+                    <code className="ml-1 text-primary break-all">{i18nService.t('baseUrlHintExample1')}</code>
+                  </p>
+                  <p>
+                    <span className="text-sm text-muted mr-1">•</span>
+                    {i18nService.t('baseUrlHint2')}
+                    <code className="ml-1 text-primary break-all">{i18nService.t('baseUrlHintExample2')}</code>
+                  </p>
+                </div>
+                )}
+                {/* GLM Coding Plan 提示 */}
+                {activeProvider === 'zhipu' && providers.zhipu.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">GLM Coding Plan:</span> {i18nService.t('zhipuCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Qwen Coding Plan 提示 */}
+                {activeProvider === 'qwen' && providers.qwen.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">Coding Plan:</span> {i18nService.t('qwenCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Volcengine Coding Plan 提示 */}
+                {activeProvider === 'volcengine' && providers.volcengine.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">Coding Plan:</span> {i18nService.t('volcengineCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Moonshot Coding Plan 提示 */}
+                {activeProvider === 'moonshot' && providers.moonshot.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">Coding Plan:</span> {i18nService.t('moonshotCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Qianfan Coding Plan 提示 */}
+                {activeProvider === 'qianfan' && providers.qianfan.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">Coding Plan:</span> {i18nService.t('qianfanCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+                {/* Xiaomi Coding Plan 提示 */}
+                {activeProvider === 'xiaomi' && providers.xiaomi.codingPlanEnabled && (
+                  <div className="mt-1.5 p-2 rounded-lg bg-primary-muted border border-primary-muted">
+                    <p className="text-[11px] text-primary dark:text-primary">
+                      <span className="font-medium">Coding Plan:</span> {i18nService.t('xiaomiCodingPlanEndpointHint')}
+                    </p>
+                  </div>
+                )}
+              </div>
               )}
 
               {/* API 格式选择器 */}
@@ -4063,6 +4604,90 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               )}
 
+              {/* Qianfan Coding Plan 开关 (仅 Qianfan) */}
+              {activeProvider === 'qianfan' && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-medium text-foreground">
+                        Coding Plan
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary-muted text-primary">
+                        Beta
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-secondary">
+                      {i18nService.t('qianfanCodingPlanHint')}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer ml-3">
+                    <input
+                      type="checkbox"
+                      checked={providers.moonshot.codingPlanEnabled ?? false}
+                      onChange={(e) => handleProviderConfigChange('moonshot', 'codingPlanEnabled', e.target.checked ? 'true' : 'false')}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+              )}
+
+              {/* Qianfan Coding Plan 开关 (仅 Qianfan) */}
+              {activeProvider === 'qianfan' && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-medium text-foreground">
+                        Coding Plan
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary-muted text-primary">
+                        Beta
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-secondary">
+                      {i18nService.t('qianfanCodingPlanHint')}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer ml-3">
+                    <input
+                      type="checkbox"
+                      checked={providers.qianfan.codingPlanEnabled ?? false}
+                      onChange={(e) => handleProviderConfigChange('qianfan', 'codingPlanEnabled', e.target.checked ? 'true' : 'false')}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+              )}
+
+              {/* Xiaomi Coding Plan 开关 (仅 Xiaomi) */}
+              {activeProvider === 'xiaomi' && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-surface border border-border">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-medium text-foreground">
+                        Coding Plan
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary-muted text-primary">
+                        Beta
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-secondary">
+                      {i18nService.t('xiaomiCodingPlanHint')}
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer ml-3">
+                    <input
+                      type="checkbox"
+                      checked={providers.xiaomi.codingPlanEnabled ?? false}
+                      onChange={(e) => handleProviderConfigChange('xiaomi', 'codingPlanEnabled', e.target.checked ? 'true' : 'false')}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary/50 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+              )}
+
               {/* 测试连接按钮 */}
               {!(activeProvider === 'minimax' && minimaxIsOAuthMode) && (
                 <div className="flex items-center space-x-3">
@@ -4164,74 +4789,47 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
         );
 
-      case 'coworkAgent':
+      case 'coworkAgent': {
+        const bootstrapTabs = [
+          { key: 'IDENTITY.md' as const, titleKey: 'coworkBootstrapIdentityTitle', hintKey: 'coworkBootstrapIdentityHint', value: bootstrapIdentity, setter: setBootstrapIdentity },
+          { key: 'SOUL.md' as const, titleKey: 'coworkBootstrapSoulTitle', hintKey: 'coworkBootstrapSoulHint', value: bootstrapSoul, setter: setBootstrapSoul },
+          { key: 'USER.md' as const, titleKey: 'coworkBootstrapUserTitle', hintKey: 'coworkBootstrapUserHint', value: bootstrapUser, setter: setBootstrapUser },
+        ];
+        const activeItem = bootstrapTabs.find((t) => t.key === bootstrapTab) ?? bootstrapTabs[0];
         return (
-          <div className="space-y-6">
-            {/* Agent Settings (IDENTITY.md + SOUL.md) */}
-            <div className="space-y-4 rounded-xl border px-4 py-4 border-border">
-              <div className="text-sm font-medium text-foreground">
-                {i18nService.t('coworkBootstrapAgentSectionTitle')}
-              </div>
-              {[
-                {
-                  filename: 'IDENTITY.md',
-                  titleKey: 'coworkBootstrapIdentityTitle',
-                  hintKey: 'coworkBootstrapIdentityHint',
-                  value: bootstrapIdentity,
-                  setter: setBootstrapIdentity,
-                },
-                {
-                  filename: 'SOUL.md',
-                  titleKey: 'coworkBootstrapSoulTitle',
-                  hintKey: 'coworkBootstrapSoulHint',
-                  value: bootstrapSoul,
-                  setter: setBootstrapSoul,
-                },
-              ].map(({ filename, titleKey, hintKey, value, setter }) => (
-                <div key={filename} className="space-y-2">
-                  <div className="text-xs font-medium text-secondary">
-                    {i18nService.t(titleKey)}
-                    {/* <span className="ml-1.5 font-normal opacity-60">
-                      （{i18nService.t('coworkBootstrapStoragePath')}：
-                      <span className="font-mono">
-                        {joinWorkspacePath(coworkConfig.workingDirectory, filename)}
-                      </span>
-                      ）
-                    </span> */}
-                  </div>
-                  <textarea
-                    value={value}
-                    onChange={e => setter(e.target.value)}
-                    rows={3}
-                    className="w-full rounded-lg border px-3 py-2 text-sm border-border bg-surface text-foreground resize-y"
-                    placeholder={i18nService.t(hintKey)}
-                  />
-                </div>
+          <div className="flex flex-col h-full space-y-4">
+            <div className="flex gap-1 border-b border-border shrink-0">
+              {bootstrapTabs.map((tab) => (
+                <button
+                  type="button"
+                  key={tab.key}
+                  onClick={() => setBootstrapTab(tab.key)}
+                  className={`px-4 py-2 text-sm font-medium transition-colors rounded-t-lg ${
+                    bootstrapTab === tab.key
+                      ? 'bg-primary-muted text-primary border-b-2 border-primary'
+                      : 'text-secondary hover:text-foreground hover:bg-surface-raised'
+                  }`}
+                >
+                  {i18nService.t(tab.titleKey)}
+                </button>
               ))}
             </div>
-
-            {/* User Profile (USER.md) */}
-            <div className="space-y-3 rounded-xl border px-4 py-4 border-border">
-              <div className="text-sm font-medium text-foreground">
-                {i18nService.t('coworkBootstrapUserTitle')}
-                {/* <span className="ml-1.5 text-xs font-normal opacity-60 text-secondary">
-                  （{i18nService.t('coworkBootstrapStoragePath')}：
-                  <span className="font-mono">
-                    {joinWorkspacePath(coworkConfig.workingDirectory, 'USER.md')}
-                  </span>
-                  ）
-                </span> */}
+            <div className="flex flex-col flex-1 min-h-0 space-y-2">
+              <p className="text-xs text-secondary shrink-0">{i18nService.t(activeItem.hintKey)}</p>
+              <div className="text-xs text-secondary opacity-60 shrink-0">
+                {i18nService.t('coworkBootstrapStoragePath')}：<span className="font-mono">{joinWorkspacePath(coworkConfig.workingDirectory, activeItem.key)}</span>
               </div>
               <textarea
-                value={bootstrapUser}
-                onChange={e => setBootstrapUser(e.target.value)}
-                rows={3}
-                className="w-full rounded-lg border px-3 py-2 text-sm border-border bg-surface text-foreground resize-y"
-                placeholder={i18nService.t('coworkBootstrapUserHint')}
+                key={activeItem.key}
+                value={activeItem.value}
+                onChange={(e) => activeItem.setter(e.target.value)}
+                className="w-full flex-1 min-h-[280px] rounded-lg border px-3 py-2 text-sm leading-relaxed border-border bg-surface text-foreground resize-none"
+                placeholder={i18nService.t('coworkBootstrapPlaceholder')}
               />
             </div>
           </div>
         );
+      }
 
       case 'shortcuts':
         return (
@@ -4299,13 +4897,98 @@ const Settings: React.FC<SettingsProps> = ({
             <span className="text-xs text-secondary mt-1">v{appVersion}</span>
 
             {/* Info Card */}
-            <div className="w-full mt-6 overflow-hidden rounded-xl border border-border bg-white">
-              <iframe
-                src="https://120.53.3.76:8088/lzclaw.html"
-                title="LZClaw"
-                loading="lazy"
-                className="block h-[520px] w-full border-0 bg-white"
-              />
+            <div className="w-full mt-8 rounded-xl border border-border overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <span className="text-sm text-foreground">{i18nService.t('aboutVersion')}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-secondary">{appVersion}</span>
+                  {!enterpriseConfig?.disableUpdate && (
+                  <button
+                    type="button"
+                    disabled={updateCheckStatus === 'checking' || updateCheckStatus === 'downloading'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleCheckUpdate();
+                    }}
+                    className="text-xs px-2 py-0.5 rounded-md border border-border text-secondary hover:text-primary dark:hover:text-primary hover:border-primary dark:hover:border-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {updateButtonLabel}
+                  </button>
+                  )}
+                  {enterpriseConfig?.disableUpdate && (
+                  <span className="text-xs text-claude-textSecondary dark:text-claude-darkTextSecondary">
+                    {i18nService.t('settings.enterprise.managed')}
+                  </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <span className="text-sm text-foreground">{i18nService.t('aboutContactEmail')}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleCopyContactEmail();
+                    }}
+                    title={i18nService.t('copyToClipboard')}
+                    className="text-sm text-secondary bg-transparent border-none appearance-none p-0 m-0 cursor-pointer focus:outline-none"
+                  >
+                    {ABOUT_CONTACT_EMAIL}
+                  </button>
+                  {emailCopied && (
+                    <span className="text-[11px] leading-4 text-emerald-600 dark:text-emerald-400">
+                      {i18nService.t('copied')}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <span className="text-sm text-foreground">{i18nService.t('aboutUserManual')}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenUserManual();
+                  }}
+                  className="text-sm text-secondary hover:text-primary dark:hover:text-primary bg-transparent border-none appearance-none px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded-md cursor-pointer focus:outline-none hover:bg-surface-raised transition-colors"
+                >
+                  {ABOUT_USER_MANUAL_URL}
+                </button>
+              </div>
+              <div className={`flex items-center justify-between px-4 py-3${testModeUnlocked ? ' border-b border-border' : ''}`}>
+                <span className="text-sm text-foreground">{i18nService.t('aboutUserCommunity')}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenUserCommunity();
+                  }}
+                  className="text-sm text-secondary hover:text-primary dark:hover:text-primary bg-transparent border-none appearance-none px-1.5 py-0.5 -mx-1.5 -my-0.5 rounded-md cursor-pointer focus:outline-none hover:bg-surface-raised transition-colors"
+                >
+                  {ABOUT_USER_COMMUNITY_URL}
+                </button>
+              </div>
+              {testModeUnlocked && (
+                <div className="flex items-center justify-between px-4 py-3">
+                  <span className="text-sm text-foreground">{i18nService.t('testMode')}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={testMode}
+                    onClick={() => setTestMode((prev) => !prev)}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                      testMode ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        testMode ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Footer */}
@@ -4564,109 +5247,109 @@ const Settings: React.FC<SettingsProps> = ({
                 <p className="mb-3 text-xs text-red-600 dark:text-red-400">{modelFormError}</p>
               )}
 
-              <div className="space-y-3">
-                {activeProvider === 'ollama' ? (
-                  <>
-                    <div>
-                      <label className="block text-xs font-medium text-secondary mb-1">
-                        {i18nService.t('ollamaModelName')}
-                      </label>
-                      <input
-                        autoFocus
-                        type="text"
-                        value={newModelId}
-                        onChange={e => {
-                          setNewModelId(e.target.value);
-                          if (!newModelName || newModelName === newModelId) {
+                <div className="space-y-3">
+                  {(activeProvider === 'ollama' || activeProvider === 'lm-studio') ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-secondary mb-1">
+                          {i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioModelName' : 'ollamaModelName')}
+                        </label>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={newModelId}
+                          onChange={(e) => {
+                            setNewModelId(e.target.value);
+                            if (!newModelName || newModelName === newModelId) {
+                              setNewModelName(e.target.value);
+                            }
+                            if (modelFormError) {
+                              setModelFormError(null);
+                            }
+                          }}
+                          className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
+                          placeholder={i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioModelNamePlaceholder' : 'ollamaModelNamePlaceholder')}
+                        />
+                        <p className="mt-1 text-[11px] text-muted">
+                          {i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioModelNameHint' : 'ollamaModelNameHint')}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-secondary mb-1">
+                          {i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioDisplayName' : 'ollamaDisplayName')}
+                        </label>
+                        <input
+                          type="text"
+                          value={newModelName === newModelId ? '' : newModelName}
+                          onChange={(e) => {
+                            setNewModelName(e.target.value || newModelId);
+                            if (modelFormError) {
+                              setModelFormError(null);
+                            }
+                          }}
+                          className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
+                          placeholder={i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioDisplayNamePlaceholder' : 'ollamaDisplayNamePlaceholder')}
+                        />
+                        <p className="mt-1 text-[11px] text-muted">
+                          {i18nService.t(activeProvider === 'lm-studio' ? 'lmStudioDisplayNameHint' : 'ollamaDisplayNameHint')}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-secondary mb-1">
+                          {i18nService.t('modelName')}
+                        </label>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={newModelName}
+                          onChange={(e) => {
                             setNewModelName(e.target.value);
-                          }
-                          if (modelFormError) {
-                            setModelFormError(null);
-                          }
-                        }}
-                        className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
-                        placeholder={i18nService.t('ollamaModelNamePlaceholder')}
-                      />
-                      <p className="mt-1 text-[11px] text-muted">
-                        {i18nService.t('ollamaModelNameHint')}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-secondary mb-1">
-                        {i18nService.t('ollamaDisplayName')}
-                      </label>
-                      <input
-                        type="text"
-                        value={newModelName === newModelId ? '' : newModelName}
-                        onChange={e => {
-                          setNewModelName(e.target.value || newModelId);
-                          if (modelFormError) {
-                            setModelFormError(null);
-                          }
-                        }}
-                        className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
-                        placeholder={i18nService.t('ollamaDisplayNamePlaceholder')}
-                      />
-                      <p className="mt-1 text-[11px] text-muted">
-                        {i18nService.t('ollamaDisplayNameHint')}
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-xs font-medium text-secondary mb-1">
-                        {i18nService.t('modelName')}
-                      </label>
-                      <input
-                        autoFocus
-                        type="text"
-                        value={newModelName}
-                        onChange={e => {
-                          setNewModelName(e.target.value);
-                          if (modelFormError) {
-                            setModelFormError(null);
-                          }
-                        }}
-                        className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
-                        placeholder="GPT-4"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-secondary mb-1">
-                        {i18nService.t('modelId')}
-                      </label>
-                      <input
-                        type="text"
-                        value={newModelId}
-                        onChange={e => {
-                          setNewModelId(e.target.value);
-                          if (modelFormError) {
-                            setModelFormError(null);
-                          }
-                        }}
-                        className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
-                        placeholder="gpt-4"
-                      />
-                    </div>
-                  </>
-                )}
-                <div className="flex items-center space-x-2">
-                  <input
-                    id={`${activeProvider}-supportsImage`}
-                    type="checkbox"
-                    checked={newModelSupportsImage}
-                    onChange={e => setNewModelSupportsImage(e.target.checked)}
-                    className="h-3.5 w-3.5 text-primary focus:ring-primary bg-surface border-border rounded"
-                  />
-                  <label
-                    htmlFor={`${activeProvider}-supportsImage`}
-                    className="text-xs text-secondary"
-                  >
-                    {i18nService.t('supportsImageInput')}
-                  </label>
+                            if (modelFormError) {
+                              setModelFormError(null);
+                            }
+                          }}
+                          className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
+                          placeholder="GPT-4"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-secondary mb-1">
+                          {i18nService.t('modelId')}
+                        </label>
+                        <input
+                          type="text"
+                          value={newModelId}
+                          onChange={(e) => {
+                            setNewModelId(e.target.value);
+                            if (modelFormError) {
+                              setModelFormError(null);
+                            }
+                          }}
+                          className="block w-full rounded-xl bg-surface-inset border-border border focus:border-primary focus:ring-1 focus:ring-primary/30 text-foreground px-3 py-2 text-xs"
+                          placeholder="gpt-4"
+                        />
+                      </div>
+                    </>
+                  )}
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id={`${activeProvider}-supportsImage`}
+                      type="checkbox"
+                      checked={newModelSupportsImage}
+                      onChange={(e) => setNewModelSupportsImage(e.target.checked)}
+                      className="h-3.5 w-3.5 text-primary focus:ring-primary bg-surface border-border rounded"
+                    />
+                    <label
+                      htmlFor={`${activeProvider}-supportsImage`}
+                      className="text-xs text-secondary"
+                    >
+                      {i18nService.t('supportsImageInput')}
+                    </label>
+                  </div>
                 </div>
-              </div>
 
               <div className="flex justify-end space-x-2 mt-4">
                 <button

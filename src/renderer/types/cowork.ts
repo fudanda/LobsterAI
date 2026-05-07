@@ -13,7 +13,7 @@ export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result
 
 // Cowork execution mode
 export type CoworkExecutionMode = 'auto' | 'local' | 'sandbox';
-export type CoworkAgentEngine = 'openclaw' | 'yd_cowork';
+export type CoworkAgentEngine = 'openclaw';
 
 export const OpenClawSessionKeepAlive = {
   OneDay: '1d',
@@ -62,6 +62,7 @@ export interface CoworkSession {
   pinned: boolean;
   cwd: string;
   systemPrompt: string;
+  modelOverride: string;
   executionMode: CoworkExecutionMode;
   activeSkillIds: string[];
   agentId: string;
@@ -82,6 +83,13 @@ export interface CoworkConfig {
   memoryGuardLevel: 'strict' | 'standard' | 'relaxed';
   memoryUserMemoriesMaxItems: number;
   skipMissedJobs: boolean;
+  embeddingEnabled: boolean;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingLocalModelPath: string;
+  embeddingVectorWeight: number;
+  embeddingRemoteBaseUrl: string;
+  embeddingRemoteApiKey: string;
   openClawSessionPolicy: OpenClawSessionPolicyConfig;
 }
 
@@ -96,6 +104,13 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'memoryGuardLevel'
   | 'memoryUserMemoriesMaxItems'
   | 'skipMissedJobs'
+  | 'embeddingEnabled'
+  | 'embeddingProvider'
+  | 'embeddingModel'
+  | 'embeddingLocalModelPath'
+  | 'embeddingVectorWeight'
+  | 'embeddingRemoteBaseUrl'
+  | 'embeddingRemoteApiKey'
 >>;
 
 export interface CoworkApiConfig {
@@ -183,6 +198,7 @@ export interface CoworkStartOptions {
   title?: string;
   activeSkillIds?: string[];
   agentId?: string;
+  modelOverride?: string;
   imageAttachments?: CoworkImageAttachment[];
 }
 
