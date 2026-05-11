@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { expect, test, vi } from 'vitest';
 
 vi.mock('electron', () => ({
@@ -355,7 +357,7 @@ test('continueSession sends the session cwd to OpenClaw chat.send', async () => 
 
   const chatSend = requests.find((request) => request.method === 'chat.send');
   expect(chatSend?.params).toMatchObject({
-    cwd: '/tmp/lobsterai-selected-project',
+    cwd: path.resolve('/tmp/lobsterai-selected-project'),
   });
 });
 
@@ -379,7 +381,7 @@ function createReconcileStore(messages: Array<Record<string, unknown>>) {
   };
   let nextId = session.messages.length + 1;
   let replaceCallCount = 0;
-  let lastReplaceArgs: { sessionId: string; authoritative: unknown[] } | null = null;
+  let lastReplaceArgs: { sessionId: string; authoritative: Array<Record<string, unknown>> } | null = null;
 
   return {
     session,
@@ -409,7 +411,7 @@ function createReconcileStore(messages: Array<Record<string, unknown>>) {
         Object.assign(message, patch);
         return true;
       },
-      replaceConversationMessages: (sessionId: string, authoritative: Array<{ role: string; text: string }>) => {
+      replaceConversationMessages: (sessionId: string, authoritative: Array<Record<string, unknown>>) => {
         replaceCallCount++;
         lastReplaceArgs = { sessionId, authoritative };
         // Simulate: remove old user/assistant, insert new ones
@@ -422,7 +424,7 @@ function createReconcileStore(messages: Array<Record<string, unknown>>) {
             type: entry.role,
             content: entry.text,
             metadata: { isStreaming: false, isFinal: true },
-            timestamp: nextId,
+            timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : nextId,
           });
         }
       },
@@ -479,8 +481,33 @@ test('reconcileWithHistory: missing assistant message — triggers replace', asy
   const args = getLastReplaceArgs()!;
   expect(args.sessionId).toBe(session.id);
   expect(args.authoritative).toEqual([
-    { role: 'user', text: 'Hello' },
+    { role: 'user', text: 'Hello', timestamp: 1 },
     { role: 'assistant', text: 'Hi there' },
+  ]);
+});
+
+test('reconcileWithHistory: carries gateway timestamps into replacement entries', async () => {
+  const { session, store, getLastReplaceArgs } = createReconcileStore([
+    { id: 'msg-1', type: 'user', content: 'Hello', timestamp: 1, metadata: {} },
+  ]);
+
+  const adapter = new OpenClawRuntimeAdapter(store, {});
+  adapter.gatewayClient = {
+    start: () => {},
+    stop: () => {},
+    request: async () => ({
+      messages: [
+        { role: 'user', content: 'Hello', timestamp: 5000 },
+        { role: 'assistant', content: 'Hi there', timestamp: 6000 },
+      ],
+    }),
+  };
+
+  await adapter.reconcileWithHistory(session.id, 'managed:session-1');
+
+  expect(getLastReplaceArgs()?.authoritative).toEqual([
+    { role: 'user', text: 'Hello', timestamp: 5000 },
+    { role: 'assistant', text: 'Hi there', timestamp: 6000 },
   ]);
 });
 
@@ -513,7 +540,7 @@ If nothing needs attention, reply HEARTBEAT_OK.`,
 
   expect(getReplaceCallCount()).toBe(1);
   expect(getLastReplaceArgs()?.authoritative).toEqual([
-    { role: 'user', text: 'Hello' },
+    { role: 'user', text: 'Hello', timestamp: 1 },
     { role: 'assistant', text: 'Real answer' },
   ]);
 });
@@ -801,9 +828,9 @@ test('reconcileWithHistory: tail window starting with assistant updates anchored
 
   expect(getReplaceCallCount()).toBe(1);
   expect(getLastReplaceArgs()!.authoritative).toEqual([
-    { role: 'user', text: 'First question' },
-    { role: 'assistant', text: 'First answer' },
-    { role: 'user', text: 'Second question' },
+    { role: 'user', text: 'First question', timestamp: 1 },
+    { role: 'assistant', text: 'First answer', timestamp: 2 },
+    { role: 'user', text: 'Second question', timestamp: 3 },
     { role: 'assistant', text: 'Full complete answer from gateway.' },
   ]);
 });
@@ -833,9 +860,9 @@ test('reconcileWithHistory: tail window repairs stale leading assistant before a
 
   expect(getReplaceCallCount()).toBe(1);
   expect(getLastReplaceArgs()!.authoritative).toEqual([
-    { role: 'user', text: 'First question' },
+    { role: 'user', text: 'First question', timestamp: 1 },
     { role: 'assistant', text: 'Correct previous answer' },
-    { role: 'user', text: 'Second question' },
+    { role: 'user', text: 'Second question', timestamp: 3 },
     { role: 'assistant', text: 'Full complete answer from gateway.' },
   ]);
 });
@@ -1101,7 +1128,7 @@ function createHistoryStore(messages: Array<Record<string, unknown>>) {
         session.messages.push(created);
         return created;
       },
-      replaceConversationMessages: (sessionId: string, authoritative: Array<{ role: string; text: string }>) => {
+      replaceConversationMessages: (sessionId: string, authoritative: Array<Record<string, unknown>>) => {
         expect(sessionId).toBe(session.id);
         session.messages = session.messages.filter(
           (message) => message.type !== 'user' && message.type !== 'assistant',
@@ -1112,7 +1139,7 @@ function createHistoryStore(messages: Array<Record<string, unknown>>) {
             type: entry.role,
             content: entry.text,
             metadata: { isStreaming: false, isFinal: true },
-            timestamp: nextId,
+            timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : nextId,
           });
         }
       },

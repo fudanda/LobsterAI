@@ -2815,7 +2815,6 @@ export class SkillManager {
       ? `${label} connectivity check timed out`
       : result.error
         || this.getLastOutputLine(result.stderr)
-        || this.getLastOutputLine(result.stdout)
         || `${label} connection failed`;
 
     return {

@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, protocol, screen, session, shell } from 'electron';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,7 +8,9 @@ import type { OpenClawSessionPatch } from '../common/openclawSession';
 import { buildSessionTitleFromInput } from '../common/sessionTitle';
 import { buildScheduledTaskEnginePrompt } from '../scheduledTask/enginePrompt';
 import { migrateScheduledTaskRunsToOpenclaw, migrateScheduledTasksToOpenclaw } from '../scheduledTask/migrate';
+import { AgentIpcChannel } from '../shared/agent/constants';
 import { AppUpdateIpc } from '../shared/appUpdate/constants';
+import { COWORK_MESSAGE_PAGE_SIZE, COWORK_SESSION_PAGE_SIZE } from '../shared/cowork/constants';
 import { PlatformRegistry } from '../shared/platform';
 import { ProviderName } from '../shared/providers';
 import { AgentManager } from './agentManager';
@@ -99,6 +101,13 @@ import { getSkillServiceManager } from './skillServices';
 import { SqliteStore } from './sqliteStore';
 import { StartupProfiler } from './startupProfiler';
 import { createTray, destroyTray, updateTrayMenu } from './trayManager';
+import {
+  AppWindowStoreKey,
+  MIN_APP_WINDOW_HEIGHT,
+  MIN_APP_WINDOW_WIDTH,
+  resolveInitialAppWindowState,
+  type WindowRectangle,
+} from './windowState';
 
 const gwDiagTs = (): string => {
   const d = new Date();
@@ -1010,6 +1019,19 @@ const getAgentManager = () => {
   return agentManager;
 };
 
+const resolveAgentDefaultWorkingDirectory = (agentId?: string): string => {
+  const resolvedAgentId = agentId?.trim() || 'main';
+  const agentWorkingDirectory = getAgentManager().getAgent(resolvedAgentId)?.workingDirectory?.trim();
+  if (agentWorkingDirectory) return agentWorkingDirectory;
+  return getCoworkStore().getConfig().workingDirectory.trim();
+};
+
+const resolveSessionWorkingDirectory = (options: { cwd?: string; agentId?: string }): string => {
+  const explicitWorkingDirectory = options.cwd?.trim();
+  if (explicitWorkingDirectory) return explicitWorkingDirectory;
+  return resolveAgentDefaultWorkingDirectory(options.agentId);
+};
+
 const isLobsteraiServerModelRef = (modelRef: string): boolean => {
   const normalized = modelRef.trim();
   if (!normalized) return false;
@@ -1342,13 +1364,13 @@ const bindCoworkRuntimeForwarder = (): void => {
     });
   });
 
-  runtime.on('messageUpdate', (sessionId: string, messageId: string, content: string) => {
+  runtime.on('messageUpdate', (sessionId: string, messageId: string, content: string, metadata?: Record<string, unknown>) => {
     const safeContent = truncateIpcString(content, IPC_UPDATE_CONTENT_MAX_CHARS);
     const windows = BrowserWindow.getAllWindows();
     windows.forEach((win) => {
       if (win.isDestroyed()) return;
       try {
-        win.webContents.send('cowork:stream:messageUpdate', { sessionId, messageId, content: safeContent });
+        win.webContents.send('cowork:stream:messageUpdate', { sessionId, messageId, content: safeContent, metadata });
       } catch (error) {
         console.error('Failed to forward cowork message update:', error);
       }
@@ -1418,7 +1440,7 @@ const getCoworkEngineRouter = () => {
           const channelSessionSync = new OpenClawChannelSessionSync({
             coworkStore: getCoworkStore(),
             imStore,
-            getDefaultCwd: () => getCoworkStore().getConfig().workingDirectory || os.homedir(),
+            getDefaultCwd: (agentId?: string) => resolveAgentDefaultWorkingDirectory(agentId) || os.homedir(),
             resolveJobName: (jobId) => getCronJobService().getJobNameSync(jobId),
           });
           openClawRuntimeAdapter.setChannelSessionSync(channelSessionSync);
@@ -1834,7 +1856,9 @@ let isQuitting = false;
 // 存储活跃的流式请求控制器
 const activeStreamControllers = new Map<string, AbortController>();
 let lastReloadAt = 0;
+let windowStateSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const MIN_RELOAD_INTERVAL_MS = 5000;
+const WINDOW_STATE_SAVE_DEBOUNCE_MS = 300;
 type AppConfigSettings = {
   theme?: string;
   language?: string;
@@ -1921,6 +1945,45 @@ const emitWindowState = () => {
     isFullscreen: mainWindow.isFullScreen(),
     isFocused: mainWindow.isFocused(),
   });
+};
+
+const getDisplayWorkAreas = (): WindowRectangle[] => {
+  return screen.getAllDisplays().map((display) => display.workArea);
+};
+
+const getCurrentAppWindowState = () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+
+  const bounds = mainWindow.isFullScreen()
+    ? mainWindow.getNormalBounds()
+    : mainWindow.isMaximized()
+      ? mainWindow.getNormalBounds()
+      : mainWindow.getBounds();
+
+  return {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    isMaximized: mainWindow.isMaximized(),
+  };
+};
+
+const persistAppWindowState = () => {
+  const state = getCurrentAppWindowState();
+  if (!state) return;
+  getStore().set(AppWindowStoreKey.State, state);
+};
+
+const schedulePersistAppWindowState = () => {
+  if (windowStateSaveTimer) {
+    clearTimeout(windowStateSaveTimer);
+  }
+
+  windowStateSaveTimer = setTimeout(() => {
+    windowStateSaveTimer = null;
+    persistAppWindowState();
+  }, WINDOW_STATE_SAVE_DEBOUNCE_MS);
 };
 
 const showSystemMenu = (position?: { x?: number; y?: number }) => {
@@ -2177,6 +2240,12 @@ if (!gotTheLock) {
         error: error instanceof Error ? error.message : 'Failed to set prevent-sleep',
       };
     }
+  });
+
+  ipcMain.handle('app:relaunch', () => {
+    console.log('[Main] app:relaunch requested, scheduling restart...');
+    app.relaunch();
+    app.quit();
   });
 
   // Window control IPC handlers
@@ -2812,9 +2881,12 @@ if (!gotTheLock) {
       const systemPrompt = mergeCoworkSystemPrompt(
         options.systemPrompt ?? config.systemPrompt,
       );
-      const selectedWorkspaceRoot = (options.cwd || config.workingDirectory || '').trim();
+      const selectedTaskDirectory = resolveSessionWorkingDirectory({
+        cwd: options.cwd,
+        agentId: options.agentId,
+      });
 
-      if (!selectedWorkspaceRoot) {
+      if (!selectedTaskDirectory) {
         return {
           success: false,
           error: 'Please select a task folder before submitting.',
@@ -2826,7 +2898,7 @@ if (!gotTheLock) {
         t('coworkDefaultSessionTitle')
       );
       const title = options.title?.trim() || fallbackTitle;
-      const taskWorkingDirectory = resolveTaskWorkingDirectory(selectedWorkspaceRoot);
+      const taskWorkingDirectory = resolveTaskWorkingDirectory(selectedTaskDirectory);
 
       const session = coworkStoreInstance.createSession(
         title,
@@ -2878,7 +2950,7 @@ if (!gotTheLock) {
         skipInitialUserMessage: true,
         systemPrompt,
         skillIds: options.activeSkillIds,
-        workspaceRoot: selectedWorkspaceRoot,
+        workspaceRoot: taskWorkingDirectory,
         confirmationMode: 'modal',
         imageAttachments: options.imageAttachments,
         agentId: options.agentId,
@@ -3049,8 +3121,8 @@ if (!gotTheLock) {
   ipcMain.handle('cowork:session:pin', async (_event, options: { sessionId: string; pinned: boolean }) => {
     try {
       const coworkStoreInstance = getCoworkStore();
-      coworkStoreInstance.setSessionPinned(options.sessionId, options.pinned);
-      return { success: true };
+      const pinOrder = coworkStoreInstance.setSessionPinned(options.sessionId, options.pinned);
+      return { success: true, pinOrder };
     } catch (error) {
       return {
         success: false,
@@ -3101,10 +3173,15 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('cowork:session:list', async (_event, agentId?: string) => {
+  ipcMain.handle('cowork:session:list', async (_event, options?: { limit?: number; offset?: number; agentId?: string }) => {
     try {
-      const sessions = getCoworkStore().listSessions(agentId);
-      return { success: true, sessions };
+      const limit = options?.limit ?? COWORK_SESSION_PAGE_SIZE;
+      const offset = options?.offset ?? 0;
+      const agentId = options?.agentId;
+      const store = getCoworkStore();
+      const sessions = store.listSessions(limit, offset, agentId);
+      const total = store.countSessions(agentId);
+      return { success: true, sessions, hasMore: offset + sessions.length < total };
     } catch (error) {
       return {
         success: false,
@@ -3113,9 +3190,24 @@ if (!gotTheLock) {
     }
   });
 
+  ipcMain.handle('cowork:session:getMessages', async (_event, options: { sessionId: string; limit?: number; offset?: number }) => {
+    try {
+      const { sessionId, limit = COWORK_MESSAGE_PAGE_SIZE, offset = 0 } = options;
+      const store = getCoworkStore();
+      const total = store.countSessionMessages(sessionId);
+      const messages = store.getPagedSessionMessages(sessionId, limit, offset);
+      return { success: true, messages, offset, total };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get session messages',
+      };
+    }
+  });
+
   // ========== Agent IPC Handlers ==========
 
-  ipcMain.handle('agents:list', async () => {
+  ipcMain.handle(AgentIpcChannel.List, async () => {
     try {
       const agents = getAgentManager().listAgents();
       return { success: true, agents };
@@ -3124,7 +3216,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('agents:get', async (_event, id: string) => {
+  ipcMain.handle(AgentIpcChannel.Get, async (_event, id: string) => {
     try {
       const agent = getAgentManager().getAgent(id);
       return { success: true, agent };
@@ -3133,10 +3225,10 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('agents:create', async (_event, request: import('./coworkStore').CreateAgentRequest) => {
+  ipcMain.handle(AgentIpcChannel.Create, async (_event, request: import('./coworkStore').CreateAgentRequest) => {
     try {
       const agent = getAgentManager().createAgent(request, resolveDefaultAgentModelRef());
-      // Sync config so workspace files (SOUL.md, IDENTITY.md) are written
+      // Sync config so workspace files (SOUL.md, IDENTITY.md, USER.md) are written
       // before OpenClaw scaffolds default templates for the new agent.
       syncOpenClawConfig({ reason: 'agent-created' }).catch((err) => {
         console.error('[OpenClaw] config sync after agent-created failed:', err);
@@ -3147,19 +3239,22 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('agents:update', async (_event, id: string, updates: import('./coworkStore').UpdateAgentRequest) => {
+  ipcMain.handle(AgentIpcChannel.Update, async (_event, id: string, updates: import('./coworkStore').UpdateAgentRequest) => {
     try {
       const agent = getAgentManager().updateAgent(id, updates);
-      syncOpenClawConfig({ reason: 'agent-updated' }).catch((err) => {
-        console.error('[OpenClaw] config sync after agent-updated failed:', err);
-      });
+      const shouldSyncOpenClawConfig = Object.keys(updates).some((key) => key !== 'pinned');
+      if (shouldSyncOpenClawConfig) {
+        syncOpenClawConfig({ reason: 'agent-updated' }).catch((err) => {
+          console.error('[OpenClaw] config sync after agent-updated failed:', err);
+        });
+      }
       return { success: true, agent };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to update agent' };
     }
   });
 
-  ipcMain.handle('agents:delete', async (_event, id: string) => {
+  ipcMain.handle(AgentIpcChannel.Delete, async (_event, id: string) => {
     try {
       const result = getAgentManager().deleteAgent(id);
 
@@ -3196,7 +3291,7 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('agents:presets', async () => {
+  ipcMain.handle(AgentIpcChannel.Presets, async () => {
     try {
       const presets = getAgentManager().getPresetAgents();
       return { success: true, presets };
@@ -3205,7 +3300,16 @@ if (!gotTheLock) {
     }
   });
 
-  ipcMain.handle('agents:addPreset', async (_event, presetId: string) => {
+  ipcMain.handle(AgentIpcChannel.PresetTemplates, async () => {
+    try {
+      const presets = getAgentManager().getAllPresetAgents();
+      return { success: true, presets };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get preset templates' };
+    }
+  });
+
+  ipcMain.handle(AgentIpcChannel.AddPreset, async (_event, presetId: string) => {
     try {
       const agent = getAgentManager().addPresetAgent(presetId, resolveDefaultAgentModelRef());
       syncOpenClawConfig({ reason: 'agent-preset-added' }).catch((err) => {
@@ -3439,7 +3543,7 @@ if (!gotTheLock) {
       if (patch.model !== undefined) {
         getCoworkStore().updateSession(sessionId, {
           modelOverride: patch.model ?? '',
-        });
+        }, { touchUpdatedAt: false });
       }
 
       const session = getCoworkStore().getSession(sessionId);
@@ -3593,6 +3697,9 @@ if (!gotTheLock) {
     try {
       const mainWorkspace = getMainAgentWorkspacePath(getOpenClawEngineManager().getStateDir());
       writeBootstrapFile(mainWorkspace, filename, content);
+      syncOpenClawConfig({ reason: 'bootstrap-updated' }).catch((err) => {
+        console.error('[OpenClaw] config sync after bootstrap-updated failed:', err);
+      });
       return { success: true };
     } catch (error) {
       return {
@@ -4940,6 +5047,43 @@ if (!gotTheLock) {
     }
   );
 
+  ipcMain.handle(
+    'dialog:generateThumbnail',
+    async (_event, filePath?: string): Promise<{ success: boolean; dataUrl?: string; error?: string }> => {
+      try {
+        if (typeof filePath !== 'string' || !filePath.trim()) {
+          return { success: false, error: 'Missing file path' };
+        }
+        const resolvedPath = path.resolve(filePath.trim());
+        const stat = await fs.promises.stat(resolvedPath);
+        if (!stat.isFile()) {
+          return { success: false, error: 'Not a file' };
+        }
+        if (process.platform !== 'darwin') {
+          return { success: false, error: 'Thumbnail generation only supported on macOS' };
+        }
+        const { execFile } = await import('child_process');
+        const { promisify } = await import('util');
+        const execFileAsync = promisify(execFile);
+        const tmpDir = path.join(app.getPath('temp'), 'lobsterai-thumbnails');
+        await fs.promises.mkdir(tmpDir, { recursive: true });
+        const baseName = path.basename(resolvedPath);
+        const outputFile = path.join(tmpDir, `${baseName}.png`);
+        try { await fs.promises.unlink(outputFile); } catch { /* ignore */ }
+        await execFileAsync('qlmanage', ['-t', '-s', '1200', '-o', tmpDir, resolvedPath]);
+        const thumbBuffer = await fs.promises.readFile(outputFile);
+        const base64 = thumbBuffer.toString('base64');
+        try { await fs.promises.unlink(outputFile); } catch { /* ignore */ }
+        return { success: true, dataUrl: `data:image/png;base64,${base64}` };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to generate thumbnail',
+        };
+      }
+    }
+  );
+
   // Shell handlers - 打开文件/文件夹
   ipcMain.handle('shell:openPath', async (_event, filePath: string) => {
     try {
@@ -4968,6 +5112,19 @@ if (!gotTheLock) {
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
     try {
       await shell.openExternal(url);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+
+  ipcMain.handle('shell:openHtmlInBrowser', async (_event, htmlContent: string) => {
+    try {
+      const tmpDir = path.join(os.tmpdir(), 'lobsterai-preview');
+      fs.mkdirSync(tmpDir, { recursive: true });
+      const tmpFile = path.join(tmpDir, `preview-${Date.now()}.html`);
+      fs.writeFileSync(tmpFile, htmlContent, 'utf-8');
+      await shell.openExternal(`file://${tmpFile}`);
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
@@ -5208,11 +5365,29 @@ if (!gotTheLock) {
     }
   };
 
+  const isArtifactSandboxUrl = (url: string): boolean => {
+    try {
+      const pathname = new URL(url).pathname;
+      return pathname.endsWith('/artifact-react-sandbox.html')
+        || pathname.includes('/vendor/react.production.min.js')
+        || pathname.includes('/vendor/react-dom.production.min.js')
+        || pathname.includes('/vendor/babel.min.js');
+    } catch {
+      return false;
+    }
+  };
+
   // 设置 Content Security Policy
   const setContentSecurityPolicy = () => {
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       // 跳过企微授权页面，让其使用自身的 CSP（否则外部脚本被阻止导致空白页）
       if (isWecomAuthUrl(details.url)) {
+        callback({ responseHeaders: details.responseHeaders });
+        return;
+      }
+
+      // 跳过 artifact 沙箱及其 vendor 脚本的 CSP（iframe sandbox="allow-scripts" 隔离）
+      if (isArtifactSandboxUrl(details.url)) {
         callback({ responseHeaders: details.responseHeaders });
         return;
       }
@@ -5228,7 +5403,7 @@ if (!gotTheLock) {
         "font-src 'self' data:",
         "media-src 'self'",
         "worker-src 'self' blob:",
-        "frame-src 'self'"
+        "frame-src 'self' file:"
       ];
 
       callback({
@@ -5250,9 +5425,14 @@ if (!gotTheLock) {
       return;
     }
 
+    const initialWindowState = resolveInitialAppWindowState(
+      getStore().get(AppWindowStoreKey.State),
+      getDisplayWorkAreas(),
+    );
+    const { isMaximized: shouldRestoreMaximized, ...initialWindowBounds } = initialWindowState;
+
     mainWindow = new BrowserWindow({
-      width: 1200,
-      height: 800,
+      ...initialWindowBounds,
       title: APP_NAME,
       icon: getAppIconPath(),
       ...(isMac
@@ -5333,7 +5513,10 @@ if (!gotTheLock) {
     });
 
     // 设置窗口的最小尺寸
-    mainWindow.setMinimumSize(800, 600);
+    mainWindow.setMinimumSize(MIN_APP_WINDOW_WIDTH, MIN_APP_WINDOW_HEIGHT);
+    if (shouldRestoreMaximized) {
+      mainWindow.maximize();
+    }
 
     // 设置窗口加载超时
     const loadTimeout = setTimeout(() => {
@@ -5356,6 +5539,12 @@ if (!gotTheLock) {
 
     // 处理窗口关闭
     mainWindow.on('close', (e) => {
+      if (windowStateSaveTimer) {
+        clearTimeout(windowStateSaveTimer);
+        windowStateSaveTimer = null;
+      }
+      persistAppWindowState();
+
       // In development, close should actually quit so `npm run electron:dev`
       // restarts from a clean process. In production we keep tray behavior.
       if (mainWindow && !isQuitting && !isDev) {
@@ -5402,7 +5591,8 @@ if (!gotTheLock) {
     }
 
     // 添加错误处理
-    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return;
       console.error('Page failed to load:', errorCode, errorDescription);
       // 如果加载失败，尝试重新加载
       if (isDev) {
@@ -5414,14 +5604,24 @@ if (!gotTheLock) {
 
     // 当窗口关闭时，清除引用
     mainWindow.on('closed', () => {
+      if (windowStateSaveTimer) {
+        clearTimeout(windowStateSaveTimer);
+        windowStateSaveTimer = null;
+      }
       mainWindow = null;
     });
 
     const forwardWindowState = () => emitWindowState();
-    mainWindow.on('maximize', forwardWindowState);
-    mainWindow.on('unmaximize', forwardWindowState);
-    mainWindow.on('enter-full-screen', forwardWindowState);
-    mainWindow.on('leave-full-screen', forwardWindowState);
+    const forwardAndPersistWindowState = () => {
+      emitWindowState();
+      schedulePersistAppWindowState();
+    };
+    mainWindow.on('resize', schedulePersistAppWindowState);
+    mainWindow.on('move', schedulePersistAppWindowState);
+    mainWindow.on('maximize', forwardAndPersistWindowState);
+    mainWindow.on('unmaximize', forwardAndPersistWindowState);
+    mainWindow.on('enter-full-screen', forwardAndPersistWindowState);
+    mainWindow.on('leave-full-screen', forwardAndPersistWindowState);
     mainWindow.on('focus', forwardWindowState);
     mainWindow.on('blur', forwardWindowState);
 

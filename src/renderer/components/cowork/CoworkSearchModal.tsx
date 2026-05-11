@@ -1,22 +1,26 @@
+import { AgentId } from '@shared/agent';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { XMarkIcon } from '@heroicons/react/24/outline';
-import SearchIcon from '../icons/SearchIcon';
+import { useSelector } from 'react-redux';
+
+import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
-import type { CoworkSessionSummary } from '../../types/cowork';
-import CoworkSessionList from './CoworkSessionList';
+import { RootState } from '../../store';
+import { CoworkSessionStatusValue, type CoworkSessionSummary } from '../../types/cowork';
+import { getAgentDisplayNameById } from '../../utils/agentDisplay';
 import Modal from '../common/Modal';
 
-const emptySet = new Set<string>();
+const SEARCH_SESSION_LIMIT = 100;
+
+const getSessionAgentId = (session: CoworkSessionSummary) => {
+  return session.agentId?.trim() || AgentId.Main;
+};
 
 interface CoworkSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   sessions: CoworkSessionSummary[];
   currentSessionId: string | null;
-  onSelectSession: (sessionId: string) => void;
-  onDeleteSession: (sessionId: string) => void;
-  onTogglePin: (sessionId: string, pinned: boolean) => void;
-  onRenameSession: (sessionId: string, title: string) => void;
+  onSelectSession: (session: CoworkSessionSummary) => void | Promise<void>;
 }
 
 const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
@@ -25,18 +29,31 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
   sessions,
   currentSessionId,
   onSelectSession,
-  onDeleteSession,
-  onTogglePin,
-  onRenameSession,
 }) => {
+  const agents = useSelector((state: RootState) => state.agent.agents);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchSessions, setSearchSessions] = useState<CoworkSessionSummary[]>(sessions);
+  const [isLoading, setIsLoading] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const agentNameBySessionId = useMemo(() => {
+    const names = new Map<string, string>();
+    searchSessions.forEach((session) => {
+      const agentId = getSessionAgentId(session);
+      names.set(session.id, getAgentDisplayNameById(agentId, agents) ?? agentId);
+    });
+    return names;
+  }, [agents, searchSessions]);
 
   const filteredSessions = useMemo(() => {
     const trimmedQuery = searchQuery.trim().toLowerCase();
-    if (!trimmedQuery) return sessions;
-    return sessions.filter((session) => session.title.toLowerCase().includes(trimmedQuery));
-  }, [sessions, searchQuery]);
+    if (!trimmedQuery) return searchSessions;
+    return searchSessions.filter((session) => {
+      const agentName = agentNameBySessionId.get(session.id) ?? '';
+      return session.title.toLowerCase().includes(trimmedQuery)
+        || agentName.toLowerCase().includes(trimmedQuery);
+    });
+  }, [agentNameBySessionId, searchQuery, searchSessions]);
 
   useEffect(() => {
     if (isOpen) {
@@ -50,6 +67,31 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen) {
+      setSearchSessions(sessions);
+    }
+  }, [isOpen, sessions]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setIsLoading(true);
+    void coworkService.listSessionsForSearch(SEARCH_SESSION_LIMIT, 0)
+      .then((result) => {
+        if (cancelled || !result.success || !result.sessions) return;
+        setSearchSessions(result.sessions);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -60,8 +102,8 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
-  const handleSelectSession = async (sessionId: string) => {
-    await onSelectSession(sessionId);
+  const handleSelectSession = async (session: CoworkSessionSummary) => {
+    await onSelectSession(session);
     onClose();
   };
 
@@ -70,54 +112,81 @@ const CoworkSearchModal: React.FC<CoworkSearchModalProps> = ({
   return (
     <Modal
       onClose={onClose}
-      overlayClassName="fixed inset-0 z-50 flex items-start justify-center modal-backdrop p-6"
-      className="modal-content w-full max-w-2xl mt-10 rounded-2xl border border-border bg-surface shadow-modal overflow-hidden"
+      overlayClassName="fixed inset-0 z-50 flex items-start justify-center bg-black/10 px-6 pt-[18vh] backdrop-blur-[1px] dark:bg-black/30"
+      className="modal-content w-full max-w-[520px] overflow-hidden rounded-[18px] border border-border bg-white shadow-modal dark:bg-surface"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={i18nService.t('search')}
       >
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-          <div className="relative flex-1">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-secondary" />
-            <input
-              ref={searchInputRef}
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={i18nService.t('searchConversations')}
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-lg bg-surface text-foreground placeholder-secondary border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+        <input
+          ref={searchInputRef}
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder={i18nService.t('searchConversations')}
+          aria-label={i18nService.t('search')}
+          className="h-12 w-full bg-transparent px-4 text-[13px] text-foreground placeholder-secondary outline-none"
+        />
+        <div className="px-2 pb-2">
+          <div className="px-2 pb-1 text-[12px] text-secondary">
+            {i18nService.t('searchRecentTasks')}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-lg text-secondary hover:bg-surface-raised transition-colors"
-            aria-label={i18nService.t('close')}
-          >
-            <XMarkIcon className="h-5 w-5" />
-          </button>
-        </div>
-        <div className="px-3 py-3 max-h-[60vh] overflow-y-auto">
-          {filteredSessions.length === 0 ? (
-            <div className="py-10 text-center text-sm text-secondary">
-              {i18nService.t('searchNoResults')}
-            </div>
-          ) : (
-            <CoworkSessionList
-              sessions={filteredSessions}
-              currentSessionId={currentSessionId}
-              isBatchMode={false}
-              selectedIds={emptySet}
-              showBatchOption={false}
-              onSelectSession={handleSelectSession}
-              onDeleteSession={onDeleteSession}
-              onTogglePin={onTogglePin}
-              onRenameSession={onRenameSession}
-              onToggleSelection={() => {}}
-              onEnterBatchMode={() => {}}
-            />
-          )}
+          <div className="max-h-[320px] overflow-y-auto">
+            {filteredSessions.length === 0 ? (
+              <div className="py-10 text-center text-sm text-secondary">
+                {isLoading ? i18nService.t('loading') : i18nService.t('searchNoResults')}
+              </div>
+            ) : (
+              filteredSessions.map((session) => {
+                const agentName = agentNameBySessionId.get(session.id) ?? getSessionAgentId(session);
+                const isSelected = session.id === currentSessionId;
+                const isRunning = session.status === CoworkSessionStatusValue.Running;
+                return (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => void handleSelectSession(session)}
+                    className={`group flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] transition-colors ${
+                      isSelected
+                        ? 'bg-black/[0.06] text-foreground dark:bg-white/[0.07]'
+                        : 'text-secondary hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]'
+                      }`}
+                  >
+                    {isRunning && (
+                      <span
+                        className="inline-flex h-3 w-3 shrink-0 items-center justify-center"
+                        title={i18nService.t('myAgentSidebarRunning')}
+                        aria-label={i18nService.t('myAgentSidebarRunning')}
+                      >
+                        <svg className="h-3 w-3 animate-spin text-primary" viewBox="0 0 24 24" fill="none">
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                          />
+                        </svg>
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate font-medium">
+                      {session.title}
+                    </span>
+                    <span className="max-w-[136px] shrink-0 truncate text-[12px] text-secondary/75">
+                      {agentName}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </Modal>

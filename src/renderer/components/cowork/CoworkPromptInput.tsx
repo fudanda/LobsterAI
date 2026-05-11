@@ -1,9 +1,8 @@
-import { CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
-import { ChevronDownIcon, FolderIcon, PaperAirplaneIcon, StopIcon } from '@heroicons/react/24/solid';
+import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ArrowUpIcon, FolderIcon, StopIcon } from '@heroicons/react/24/solid';
 import React, { useCallback,useEffect, useRef, useState } from 'react';
 import { useDispatch,useSelector } from 'react-redux';
 
-import { defaultConfig } from '../../config';
 import { agentService } from '../../services/agent';
 import { configService } from '../../services/config';
 import { coworkService } from '../../services/cowork';
@@ -20,7 +19,6 @@ import {
   updateCurrentSessionModelOverride,
 } from '../../store/slices/coworkSlice';
 import type { Model } from '../../store/slices/modelSlice';
-import { setSelectedModel } from '../../store/slices/modelSlice';
 import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
 import { CoworkImageAttachment } from '../../types/cowork';
 import { Skill } from '../../types/skill';
@@ -33,6 +31,7 @@ import { ActiveSkillBadge,SkillsButton } from '../skills';
 import { resolveAgentModelSelection, resolveEffectiveModel, useAgentSelectedModel } from './agentModelSelection';
 import AttachmentCard from './AttachmentCard';
 import FolderSelectorPopover from './FolderSelectorPopover';
+import { usePersistAgentModelSelection } from './usePersistAgentModelSelection';
 
 // CoworkAttachment is aliased from the Redux-persisted DraftAttachment type
 // so that attachment state survives view switches (cowork ↔ skills, etc.)
@@ -198,6 +197,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   const currentAgent = agents.find((agent) => agent.id === currentAgentId);
   const currentAgentSelectedModel = useAgentSelectedModel(currentAgentId, currentAgent?.model ?? '');
   const {
+    isPersistingAgentModel,
+    persistAgentModelSelection,
+  } = usePersistAgentModelSelection({
+    agentId: currentAgentId,
+    syncDefaultModel: currentAgentId === 'main' || currentAgent?.isDefault === true,
+  });
+  const {
     selectedModel: agentSelectedModel,
     hasInvalidExplicitModel: agentModelIsInvalid,
   } = resolveAgentModelSelection({
@@ -249,9 +255,13 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
 
   useEffect(() => {
     const handleFocusInput = (event: Event) => {
-      const detail = (event as CustomEvent<{ clear?: boolean }>).detail;
+      const detail = (event as CustomEvent<{ clear?: boolean; text?: string }>).detail;
       const shouldClear = detail?.clear ?? true;
-      if (shouldClear) {
+      if (detail?.text !== undefined) {
+        setValue(detail.text);
+        dispatch(clearDraftAttachments(draftKey));
+        setImageVisionHint(false);
+      } else if (shouldClear) {
         setValue('');
         dispatch(clearDraftAttachments(draftKey));
         setImageVisionHint(false);
@@ -458,11 +468,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   };
 
   const containerClass = isLarge
-    ? 'relative rounded-2xl border border-border bg-surface shadow-card focus-within:shadow-elevated focus-within:ring-1 focus-within:ring-primary/40 focus-within:border-primary'
+    ? 'relative rounded-2xl border border-border bg-surface shadow-card'
     : 'relative flex items-end gap-2 p-3 rounded-xl border border-border bg-surface';
 
   const textareaClass = isLarge
-    ? `w-full resize-none bg-transparent px-4 pt-2.5 pb-2 text-foreground placeholder:dark:text-foregroundSecondary/60 placeholder:text-secondary/60 focus:outline-none text-[15px] leading-6 min-h-[${minHeight}px] max-h-[${maxHeight}px]`
+    ? `w-full resize-none bg-transparent px-4 pt-2.5 pb-2 text-foreground placeholder:dark:text-foregroundSecondary/60 placeholder:text-secondary/60 focus:outline-none text-[15px] leading-[23px] min-h-[${minHeight}px] max-h-[${maxHeight}px]`
     : 'flex-1 resize-none bg-transparent text-foreground placeholder:placeholder:text-secondary focus:outline-none text-sm leading-relaxed min-h-[24px] max-h-[200px]';
 
   const truncatePath = (path: string, maxLength = 30): string => {
@@ -770,12 +780,10 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     ? `${containerClass} ring-2 ring-primary/50 border-primary/60`
     : containerClass;
 
-  const [showSendShortcutMenu, setShowSendShortcutMenu] = useState(false);
-  const sendShortcutMenuRef = useRef<HTMLDivElement>(null);
-  const sendShortcutBtnRef = useRef<HTMLButtonElement>(null);
   const [currentSendShortcut, setCurrentSendShortcut] = useState(
     () => configService.getConfig().shortcuts?.sendMessage ?? 'Enter'
   );
+  const sendButtonTitle = `${i18nService.t('sendMessage')} (${getSendShortcutLabel(currentSendShortcut)})`;
 
   // Sync when config is updated elsewhere (e.g. Settings panel)
   useEffect(() => {
@@ -786,50 +794,6 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     window.addEventListener('config-updated', syncFromConfig);
     return () => window.removeEventListener('config-updated', syncFromConfig);
   }, []);
-  useEffect(() => {
-    if (!showSendShortcutMenu) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        sendShortcutMenuRef.current && !sendShortcutMenuRef.current.contains(e.target as Node) &&
-        sendShortcutBtnRef.current && !sendShortcutBtnRef.current.contains(e.target as Node)
-      ) {
-        setShowSendShortcutMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showSendShortcutMenu]);
-
-  const handleSendShortcutChange = async (value: string) => {
-    const config = configService.getConfig();
-    await configService.updateConfig({
-      shortcuts: { ...(config.shortcuts ?? defaultConfig.shortcuts), sendMessage: value } as NonNullable<typeof config.shortcuts>,
-    });
-    setCurrentSendShortcut(value);
-    setShowSendShortcutMenu(false);
-  };
-
-  const sendShortcutDropdown = (
-    <div
-      ref={sendShortcutMenuRef}
-      className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-xl border border-border bg-surface shadow-elevated py-1"
-    >
-      {SEND_SHORTCUT_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => handleSendShortcutChange(option.value)}
-          className="flex items-center justify-between w-full px-3 py-1.5 text-sm text-foreground hover:bg-surface-raised transition-colors"
-        >
-          <span>{isMacPlatform ? option.labelMac : option.label}</span>
-          {currentSendShortcut === option.value && (
-            <CheckIcon className="h-4 w-4 text-primary" />
-          )}
-        </button>
-      ))}
-    </div>
-  );
-
   return (
     <div className="relative">
       {attachments.length > 0 && (
@@ -935,12 +899,12 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                   <div className="flex flex-col items-start gap-1">
                     <ModelSelector
                       dropdownDirection="up"
-                      disabled={isPatchingModel}
+                      disabled={isPatchingModel || isPersistingAgentModel}
                       value={agentModelIsInvalid && currentSession?.modelOverride
                         ? { id: '__invalid__', name: currentSession.modelOverride.split('/').pop() || currentSession.modelOverride } as Model
                         : agentSelectedModel}
                       onChange={async (nextModel) => {
-                        if (isPatchingModel) return;
+                        if (isPatchingModel || isPersistingAgentModel) return;
                         if (!nextModel) return;
                         const modelRef = toOpenClawModelRef(nextModel);
                         if (sessionId) {
@@ -988,8 +952,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                           }
                           return;
                         }
-                        if (!currentAgent) return;
-                        dispatch(setSelectedModel({ agentId: currentAgentId, model: nextModel }));
+                        await persistAgentModelSelection(nextModel);
                       }}
                     />
                     {agentModelIsInvalid && (
@@ -1032,30 +995,20 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                     <StopIcon className="h-5 w-5" />
                   </button>
                 ) : (
-                  <div className="relative">
-                    <div className={`flex items-stretch rounded-xl shadow-subtle hover:shadow-card ${!canSubmit ? 'opacity-50' : ''}`}>
-                      <button
-                        type="button"
-                        onClick={handleSubmit}
-                        disabled={!canSubmit}
-                        className="p-2 rounded-l-xl bg-primary hover:bg-primary-hover text-white transition-all active:scale-95 disabled:cursor-not-allowed"
-                        aria-label="Send"
-                        title={currentSendShortcut !== 'Enter' ? getSendShortcutLabel(currentSendShortcut) : undefined}
-                      >
-                        <PaperAirplaneIcon className="h-5 w-5" />
-                      </button>
-                      <button
-                        ref={sendShortcutBtnRef}
-                        type="button"
-                        onClick={() => setShowSendShortcutMenu(!showSendShortcutMenu)}
-                        className="px-1 flex items-center rounded-r-xl bg-primary hover:bg-primary-hover text-white transition-all active:scale-95 border-l border-white/20"
-                        aria-label="Change send shortcut"
-                      >
-                        <ChevronDownIcon className="h-3 w-3" />
-                      </button>
-                    </div>
-                    {showSendShortcutMenu && sendShortcutDropdown}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
+                      canSubmit
+                        ? 'bg-neutral-950 text-white shadow-subtle hover:bg-neutral-800 active:scale-95 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'
+                        : 'cursor-not-allowed bg-neutral-300 text-white dark:bg-neutral-700 dark:text-neutral-500'
+                    }`}
+                    aria-label={i18nService.t('sendMessage')}
+                    title={sendButtonTitle}
+                  >
+                    <ArrowUpIcon className="h-[18px] w-[18px]" />
+                  </button>
                 )}
               </div>
             </div>
@@ -1099,30 +1052,20 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                 <StopIcon className="h-4 w-4" />
               </button>
             ) : (
-              <div className="relative flex-shrink-0">
-                <div className={`flex items-stretch rounded-lg shadow-subtle hover:shadow-card ${!canSubmit ? 'opacity-50' : ''}`}>
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={!canSubmit}
-                    className="p-2 rounded-l-lg bg-primary hover:bg-primary-hover text-white transition-all active:scale-95 disabled:cursor-not-allowed"
-                    aria-label="Send"
-                    title={currentSendShortcut !== 'Enter' ? getSendShortcutLabel(currentSendShortcut) : undefined}
-                  >
-                    <PaperAirplaneIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    ref={sendShortcutBtnRef}
-                    type="button"
-                    onClick={() => setShowSendShortcutMenu(!showSendShortcutMenu)}
-                    className="px-1 flex items-center rounded-r-lg bg-primary hover:bg-primary-hover text-white transition-all active:scale-95 border-l border-white/20"
-                    aria-label="Change send shortcut"
-                  >
-                    <ChevronDownIcon className="h-3 w-3" />
-                  </button>
-                </div>
-                {showSendShortcutMenu && sendShortcutDropdown}
-              </div>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full transition-all ${
+                  canSubmit
+                    ? 'bg-neutral-950 text-white shadow-subtle hover:bg-neutral-800 active:scale-95 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200'
+                    : 'cursor-not-allowed bg-neutral-300 text-white dark:bg-neutral-700 dark:text-neutral-500'
+                }`}
+                aria-label={i18nService.t('sendMessage')}
+                title={sendButtonTitle}
+              >
+                <ArrowUpIcon className="h-[17px] w-[17px]" />
+              </button>
             )}
           </>
         )}

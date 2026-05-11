@@ -1,12 +1,13 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
-import type {
-  CoworkConfig,
-  CoworkMessage,
-  CoworkPermissionRequest,
-  CoworkSession,
-  CoworkSessionStatus,
-  CoworkSessionSummary,
+import {
+  type CoworkConfig,
+  type CoworkMessage,
+  type CoworkPermissionRequest,
+  type CoworkSession,
+  type CoworkSessionStatus,
+  CoworkSessionStatusValue,
+  type CoworkSessionSummary,
 } from '../../types/cowork';
 import { removeSessionFromState, removeSessionsFromState } from './coworkDeleteState';
 
@@ -19,6 +20,8 @@ export interface DraftAttachment {
 
 interface CoworkState {
   sessions: CoworkSessionSummary[];
+  /** Whether more sessions exist on the server beyond what is currently loaded. */
+  hasMoreSessions: boolean;
   currentSessionId: string | null;
   currentSession: CoworkSession | null;
   draftPrompts: Record<string, string>;
@@ -34,6 +37,7 @@ interface CoworkState {
 
 const initialState: CoworkState = {
   sessions: [],
+  hasMoreSessions: false,
   currentSessionId: null,
   currentSession: null,
   draftPrompts: {},
@@ -78,6 +82,17 @@ const markSessionUnread = (state: CoworkState, sessionId: string) => {
   state.unreadSessionIds.push(sessionId);
 };
 
+const toSessionSummary = (session: CoworkSession): CoworkSessionSummary => ({
+  id: session.id,
+  title: session.title,
+  status: session.status,
+  pinned: session.pinned ?? false,
+  pinOrder: session.pinOrder ?? null,
+  agentId: session.agentId,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+});
+
 const coworkSlice = createSlice({
   name: 'cowork',
   initialState,
@@ -94,26 +109,40 @@ const coworkSlice = createSlice({
       });
     },
 
+    setHasMoreSessions(state, action: PayloadAction<boolean>) {
+      state.hasMoreSessions = action.payload;
+    },
+
+    appendSessions(state, action: PayloadAction<{ sessions: CoworkSessionSummary[]; hasMore: boolean }>) {
+      const { sessions, hasMore } = action.payload;
+      const existingIds = new Set(state.sessions.map(s => s.id));
+      const newSessions = sessions.filter(s => !existingIds.has(s.id));
+      state.sessions = [...state.sessions, ...newSessions];
+      state.hasMoreSessions = hasMore;
+    },
+
     setCurrentSessionId(state, action: PayloadAction<string | null>) {
       state.currentSessionId = action.payload;
       markSessionRead(state, action.payload);
     },
 
     setCurrentSession(state, action: PayloadAction<CoworkSession | null>) {
-      state.currentSession = action.payload;
+      if (action.payload) {
+        const session = action.payload;
+        // Ensure pagination fields are always present (guard against stale IPC data).
+        state.currentSession = {
+          ...session,
+          messagesOffset: session.messagesOffset ?? 0,
+          totalMessages: session.totalMessages ?? session.messages.length,
+        };
+      } else {
+        state.currentSession = null;
+      }
       if (action.payload) {
         state.currentSessionId = action.payload.id;
         if (!action.payload.id.startsWith('temp-')) {
-          const { id, title, status, pinned, createdAt, updatedAt } = action.payload;
-          const summary: CoworkSessionSummary = {
-            id,
-            title,
-            status,
-            pinned: pinned ?? false,
-            createdAt,
-            updatedAt,
-          };
-          const sessionIndex = state.sessions.findIndex((session) => session.id === id);
+          const summary = toSessionSummary(action.payload);
+          const sessionIndex = state.sessions.findIndex((session) => session.id === summary.id);
           if (sessionIndex !== -1) {
             state.sessions[sessionIndex] = {
               ...state.sessions[sessionIndex],
@@ -137,16 +166,13 @@ const coworkSlice = createSlice({
     },
 
     addSession(state, action: PayloadAction<CoworkSession>) {
-      const summary: CoworkSessionSummary = {
-        id: action.payload.id,
-        title: action.payload.title,
-        status: action.payload.status,
-        pinned: action.payload.pinned ?? false,
-        createdAt: action.payload.createdAt,
-        updatedAt: action.payload.updatedAt,
-      };
+      const summary = toSessionSummary(action.payload);
       state.sessions.unshift(summary);
-      state.currentSession = action.payload;
+      state.currentSession = {
+        ...action.payload,
+        messagesOffset: action.payload.messagesOffset ?? 0,
+        totalMessages: action.payload.totalMessages ?? action.payload.messages.length,
+      };
       state.currentSessionId = action.payload.id;
       markSessionRead(state, action.payload.id);
     },
@@ -166,7 +192,11 @@ const coworkSlice = createSlice({
         state.currentSession.status = status;
         state.currentSession.updatedAt = Date.now();
         // Streaming state is tied to the currently opened session only
-        state.isStreaming = status === 'running';
+        state.isStreaming = status === CoworkSessionStatusValue.Running;
+      }
+
+      if (status === CoworkSessionStatusValue.Completed) {
+        markSessionUnread(state, sessionId);
       }
     },
 
@@ -186,6 +216,7 @@ const coworkSlice = createSlice({
         if (!exists) {
           state.currentSession.messages.push(message);
           state.currentSession.updatedAt = message.timestamp;
+          state.currentSession.totalMessages += 1;
         }
       }
 
@@ -198,14 +229,38 @@ const coworkSlice = createSlice({
       markSessionUnread(state, sessionId);
     },
 
-    updateMessageContent(state, action: PayloadAction<{ sessionId: string; messageId: string; content: string }>) {
-      const { sessionId, messageId, content } = action.payload;
+    /** Prepend older messages when user scrolls up to load more history. */
+    prependMessages(state, action: PayloadAction<{ sessionId: string; messages: CoworkMessage[]; newOffset: number }>) {
+      const { sessionId, messages, newOffset } = action.payload;
+      if (state.currentSession?.id !== sessionId) return;
+      if (messages.length === 0) return;
+      const existingIds = new Set(state.currentSession.messages.map(m => m.id));
+      const toInsert = messages.filter(m => !existingIds.has(m.id));
+      state.currentSession.messages = [...toInsert, ...state.currentSession.messages];
+      state.currentSession.messagesOffset = newOffset;
+    },
+
+    updateMessageContent(state, action: PayloadAction<{ sessionId: string; messageId: string; content: string; metadata?: Record<string, unknown> }>) {
+      const { sessionId, messageId, content, metadata } = action.payload;
+      const updatedAt = Date.now();
 
       if (state.currentSession?.id === sessionId) {
         const messageIndex = state.currentSession.messages.findIndex(m => m.id === messageId);
         if (messageIndex !== -1) {
           state.currentSession.messages[messageIndex].content = content;
+          if (metadata) {
+            state.currentSession.messages[messageIndex].metadata = {
+              ...state.currentSession.messages[messageIndex].metadata,
+              ...metadata,
+            };
+          }
+          state.currentSession.updatedAt = updatedAt;
         }
+      }
+
+      const sessionIndex = state.sessions.findIndex(s => s.id === sessionId);
+      if (sessionIndex !== -1) {
+        state.sessions[sessionIndex].updatedAt = updatedAt;
       }
 
       markSessionUnread(state, sessionId);
@@ -219,14 +274,16 @@ const coworkSlice = createSlice({
       state.remoteManaged = action.payload;
     },
 
-    updateSessionPinned(state, action: PayloadAction<{ sessionId: string; pinned: boolean }>) {
-      const { sessionId, pinned } = action.payload;
+    updateSessionPinned(state, action: PayloadAction<{ sessionId: string; pinned: boolean; pinOrder?: number | null }>) {
+      const { sessionId, pinned, pinOrder } = action.payload;
       const sessionIndex = state.sessions.findIndex(s => s.id === sessionId);
       if (sessionIndex !== -1) {
         state.sessions[sessionIndex].pinned = pinned;
+        state.sessions[sessionIndex].pinOrder = pinned ? (pinOrder ?? state.sessions[sessionIndex].pinOrder ?? null) : null;
       }
       if (state.currentSession?.id === sessionId) {
         state.currentSession.pinned = pinned;
+        state.currentSession.pinOrder = pinned ? (pinOrder ?? state.currentSession.pinOrder ?? null) : null;
       }
     },
 
@@ -247,7 +304,6 @@ const coworkSlice = createSlice({
       const { sessionId, modelOverride } = action.payload;
       if (state.currentSession?.id !== sessionId) return;
       state.currentSession.modelOverride = modelOverride;
-      state.currentSession.updatedAt = Date.now();
     },
 
     enqueuePendingPermission(state, action: PayloadAction<CoworkPermissionRequest>) {
@@ -313,6 +369,8 @@ const coworkSlice = createSlice({
 export const {
   setCoworkActive,
   setSessions,
+  setHasMoreSessions,
+  appendSessions,
   setCurrentSessionId,
   setCurrentSession,
   setDraftPrompt,
@@ -324,6 +382,7 @@ export const {
   deleteSession,
   deleteSessions,
   addMessage,
+  prependMessages,
   updateMessageContent,
   setStreaming,
   setRemoteManaged,

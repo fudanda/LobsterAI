@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   isOpen?: boolean;
@@ -27,7 +28,7 @@ const Modal: React.FC<ModalProps> = ({
 
   if (isOpen === false) return null;
 
-  return (
+  const modal = (
     <div
       className={overlayClassName ?? 'fixed inset-0 z-50 flex items-center justify-center bg-black/50'}
       onMouseDown={(e) => {
@@ -51,6 +52,12 @@ const Modal: React.FC<ModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return modal;
+  }
+
+  return createPortal(modal, document.body);
 };
 
 export default Modal;

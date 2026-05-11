@@ -1,10 +1,11 @@
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 import React, { useMemo } from 'react';
 import { useSelector } from 'react-redux';
+
+import { i18nService } from '../../services/i18n';
 import { selectUnreadSessionIds } from '../../store/selectors/coworkSelectors';
 import type { CoworkSessionSummary } from '../../types/cowork';
 import CoworkSessionItem from './CoworkSessionItem';
-import { i18nService } from '../../services/i18n';
-import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
 interface CoworkSessionListProps {
   sessions: CoworkSessionSummary[];
@@ -39,6 +40,14 @@ const CoworkSessionList: React.FC<CoworkSessionListProps> = ({
   const unreadSessionIdSet = useMemo(() => new Set(unreadSessionIds), [unreadSessionIds]);
 
   const sortedSessions = useMemo(() => {
+    const sortByPinOrder = (a: CoworkSessionSummary, b: CoworkSessionSummary) => {
+      const aPinOrder = a.pinOrder ?? a.updatedAt ?? a.createdAt;
+      const bPinOrder = b.pinOrder ?? b.updatedAt ?? b.createdAt;
+      if (aPinOrder !== bPinOrder) {
+        return aPinOrder - bPinOrder;
+      }
+      return b.updatedAt - a.updatedAt;
+    };
     const sortByRecentActivity = (a: CoworkSessionSummary, b: CoworkSessionSummary) => {
       if (b.updatedAt !== a.updatedAt) {
         return b.updatedAt - a.updatedAt;
@@ -48,7 +57,7 @@ const CoworkSessionList: React.FC<CoworkSessionListProps> = ({
 
     const pinnedSessions = sessions
       .filter((session) => session.pinned)
-      .sort(sortByRecentActivity);
+      .sort(sortByPinOrder);
     const unpinnedSessions = sessions
       .filter((session) => !session.pinned)
       .sort(sortByRecentActivity);

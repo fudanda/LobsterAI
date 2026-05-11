@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { CoworkSessionSummary, CoworkSessionStatus } from '../../types/cowork';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
-import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
-import PencilSquareIcon from '../icons/PencilSquareIcon';
-import TrashIcon from '../icons/TrashIcon';
-import ListChecksIcon from '../icons/ListChecksIcon';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+
 import { i18nService } from '../../services/i18n';
+import type { CoworkSessionStatus, CoworkSessionSummary } from '../../types/cowork';
 import Modal from '../common/Modal';
+import EllipsisHorizontalIcon from '../icons/EllipsisHorizontalIcon';
+import ListChecksIcon from '../icons/ListChecksIcon';
+import PencilSquareIcon from '../icons/PencilSquareIcon';
+import PushPinIcon from '../icons/PushPinIcon';
+import TrashIcon from '../icons/TrashIcon';
 
 interface CoworkSessionItemProps {
   session: CoworkSessionSummary;
@@ -30,41 +32,15 @@ const statusLabels: Record<CoworkSessionStatus, string> = {
   error: 'coworkStatusError',
 };
 
-const PushPinIcon: React.FC<React.SVGProps<SVGSVGElement> & { slashed?: boolean }> = ({
-  slashed,
-  ...props
-}) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth={2}
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    {...props}
-  >
-    <g transform="rotate(45 12 12)">
-      <path d="M9 3h6l-1 5 2 2v2H8v-2l2-2-1-5z" />
-      <path d="M12 12v9" />
-    </g>
-    {slashed && <path d="M5 5L19 19" />}
-  </svg>
-);
-
 const formatRelativeTime = (timestamp: number): { compact: string; full: string } => {
   const now = Date.now();
-  const diff = now - timestamp;
+  const diff = Math.max(0, now - timestamp);
 
-  const minutes = Math.floor(diff / 60000);
+  const minutes = Math.max(1, Math.floor(diff / 60000));
   const hours = Math.floor(diff / 3600000);
   const days = Math.floor(diff / 86400000);
 
-  if (minutes < 1) {
-    return {
-      compact: 'now',
-      full: i18nService.t('justNow'),
-    };
-  } else if (minutes < 60) {
+  if (minutes <= 60) {
     return {
       compact: `${minutes}m`,
       full: `${minutes} ${i18nService.t('minutesAgo')}`,
@@ -104,7 +80,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(session.title);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ right: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionButtonRef = useRef<HTMLButtonElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -120,14 +96,10 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   const calculateMenuPosition = (height: number) => {
     const rect = actionButtonRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    const menuWidth = 180;
     const padding = 8;
-    const x = Math.min(
-      Math.max(padding, rect.right - menuWidth),
-      window.innerWidth - menuWidth - padding
-    );
+    const right = Math.max(padding, window.innerWidth - rect.right);
     const y = Math.min(rect.bottom + 8, window.innerHeight - height - padding);
-    return { x, y };
+    return { right, y };
   };
 
   const openMenu = (e: React.MouseEvent) => {
@@ -242,7 +214,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
     if (!menuPosition) return;
     const menuHeight = showConfirmDelete ? 112 : (showBatchOption ? 156 : 120);
     const position = calculateMenuPosition(menuHeight);
-    if (position && (position.x !== menuPosition.x || position.y !== menuPosition.y)) {
+    if (position && (position.right !== menuPosition.right || position.y !== menuPosition.y)) {
       setMenuPosition(position);
     }
   }, [menuPosition, showConfirmDelete]);
@@ -263,15 +235,16 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
   const showRunningIndicator = session.status === 'running';
   const showUnreadIndicator = !showRunningIndicator && hasUnread;
   const showStatusIndicator = showRunningIndicator || showUnreadIndicator;
+  const showRelativeTime = !showStatusIndicator;
   const batchLabel = i18nService.t('batchOperations');
   const menuItems = useMemo(() => {
     const items = [
-      { key: 'rename', label: renameLabel, onClick: handleRenameClick, tone: 'neutral' as const },
-      { key: 'pin', label: pinButtonLabel, onClick: handleTogglePin, tone: 'neutral' as const },
-      { key: 'delete', label: deleteLabel, onClick: handleDeleteClick, tone: 'danger' as const },
+      { key: 'rename', label: renameLabel, onClick: handleRenameClick },
+      { key: 'pin', label: pinButtonLabel, onClick: handleTogglePin },
+      { key: 'delete', label: deleteLabel, onClick: handleDeleteClick },
     ];
     if (showBatchOption) {
-      items.unshift({ key: 'batch', label: batchLabel, onClick: handleBatchClick, tone: 'neutral' as const });
+      items.unshift({ key: 'batch', label: batchLabel, onClick: handleBatchClick });
     }
     return items;
   }, [
@@ -324,7 +297,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
             {/* Status indicator */}
             {showStatusIndicator && (
               <span
-                className={`block w-2 h-2 rounded-full bg-primary flex-shrink-0 ${
+                className={`block w-2 h-2 rounded-full bg-blue-500 flex-shrink-0 ${
                   showRunningIndicator ? 'shadow-[0_0_6px_rgba(59,130,246,0.5)] animate-pulse' : ''
                 }`}
                 title={showRunningIndicator ? i18nService.t(statusLabels[session.status]) : undefined}
@@ -354,9 +327,11 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
             )}
           </div>
           <div className="flex items-center gap-2 text-xs text-secondary">
-            <span className="whitespace-nowrap" title={relativeTime.full}>
-              {relativeTime.compact}
-            </span>
+            {showRelativeTime && (
+              <span className="whitespace-nowrap" title={relativeTime.full}>
+                {relativeTime.compact}
+              </span>
+            )}
             <span className="text-[10px] uppercase tracking-wider whitespace-nowrap">
               {i18nService.t(statusLabels[session.status])}
             </span>
@@ -396,8 +371,8 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
       {menuPosition && (
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[180px] rounded-xl border border-border bg-surface shadow-lg overflow-hidden"
-          style={{ top: menuPosition.y, left: menuPosition.x }}
+          className="fixed z-50 w-max min-w-[124px] max-w-[calc(100vw-16px)] rounded-xl border border-border bg-surface shadow-lg overflow-hidden"
+          style={{ top: menuPosition.y, right: menuPosition.right }}
           role="menu"
         >
           {menuItems.map((item) => (
@@ -405,11 +380,7 @@ const CoworkSessionItem: React.FC<CoworkSessionItemProps> = ({
               key={item.key}
               type="button"
               onClick={item.onClick}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                item.tone === 'danger'
-                  ? 'text-red-500 hover:bg-red-500/10'
-                  : 'text-foreground hover:bg-surface-raised'
-              }`}
+              className="w-full flex items-center gap-2 whitespace-nowrap px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-surface-raised"
             >
               {item.key === 'batch' && <ListChecksIcon className="h-4 w-4" />}
               {item.key === 'rename' && <PencilSquareIcon className="h-4 w-4" />}

@@ -1,5 +1,6 @@
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
-import React, { useCallback,useEffect, useState } from 'react';
+import { Cog6ToothIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { AgentId } from '@shared/agent';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import { agentService } from '../services/agent';
@@ -10,9 +11,10 @@ import {
   selectCoworkSessions,
   selectCurrentSessionId,
 } from '../store/selectors/coworkSelectors';
+import type { CoworkSessionSummary } from '../types/cowork';
+import MyAgentSidebarTree from './agentSidebar/MyAgentSidebarTree';
 import Modal from './common/Modal';
 import CoworkSearchModal from './cowork/CoworkSearchModal';
-import CoworkSessionList from './cowork/CoworkSessionList';
 import ClockIcon from './icons/ClockIcon';
 import ComposeIcon from './icons/ComposeIcon';
 import ConnectorIcon from './icons/ConnectorIcon';
@@ -20,24 +22,32 @@ import PuzzleIcon from './icons/PuzzleIcon';
 import SearchIcon from './icons/SearchIcon';
 import SidebarToggleIcon from './icons/SidebarToggleIcon';
 import TrashIcon from './icons/TrashIcon';
-import UserGroupIcon from './icons/UserGroupIcon';
 import LoginButton from './LoginButton';
 
 interface SidebarProps {
   onShowSettings: () => void;
   onShowLogin?: () => void;
-  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp' | 'agents';
+  activeView: 'cowork' | 'skills' | 'scheduledTasks' | 'mcp';
   onShowSkills: () => void;
   onShowCowork: () => void;
   onShowScheduledTasks: () => void;
   onShowMcp: () => void;
-  onShowAgents: () => void;
   onNewChat: () => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   updateBadge?: React.ReactNode;
   hideLogin?: boolean;
 }
+
+const DEFAULT_SIDEBAR_WIDTH = 244;
+const MIN_SIDEBAR_WIDTH = 220;
+const MAX_SIDEBAR_WIDTH = 420;
+const SIDEBAR_COLLAPSE_TRANSITION_MS = 200;
+const sidebarNavItemClassName =
+  'w-full inline-flex h-7 items-center gap-2 rounded-md px-1.5 text-left text-[14px] font-normal text-foreground/80 transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04]';
+const activeSidebarNavItemClassName =
+  `${sidebarNavItemClassName} bg-black/[0.06] hover:bg-black/[0.06] dark:bg-white/[0.07] dark:hover:bg-white/[0.07]`;
+const sidebarCreateIconClassName = 'h-4 w-4 shrink-0 text-secondary/40 dark:text-secondary/45';
 
 const Sidebar: React.FC<SidebarProps> = ({
   onShowSettings,
@@ -46,7 +56,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onShowCowork,
   onShowScheduledTasks,
   onShowMcp,
-  onShowAgents,
   onNewChat,
   isCollapsed,
   onToggleCollapse,
@@ -55,13 +64,19 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
   const sessions = useSelector(selectCoworkSessions);
-  const filteredSessions = sessions.filter((s) => !s.agentId || s.agentId === currentAgentId);
+  const filteredSessions = sessions.filter(s => !s.agentId || s.agentId === currentAgentId);
   const currentSessionId = useSelector(selectCurrentSessionId);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [isResizing, setIsResizing] = useState(false);
+  const [agentScrollEdges, setAgentScrollEdges] = useState({ top: false, bottom: false });
+  const isResizingRef = useRef(false);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH);
+  const agentScrollContainerRef = useRef<HTMLDivElement>(null);
   const isMac = window.electron.platform === 'darwin';
 
   useEffect(() => {
@@ -83,21 +98,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     setShowBatchDeleteConfirm(false);
   }, [isCollapsed]);
 
-  const handleSelectSession = async (sessionId: string) => {
+  const handleSelectSession = async (session: CoworkSessionSummary) => {
+    const agentId = session.agentId?.trim() || AgentId.Main;
+    if (agentId !== currentAgentId) {
+      agentService.switchAgent(agentId);
+      await coworkService.loadSessions(agentId);
+    }
     onShowCowork();
-    await coworkService.loadSession(sessionId);
-  };
-
-  const handleDeleteSession = async (sessionId: string) => {
-    await coworkService.deleteSession(sessionId);
-  };
-
-  const handleTogglePin = async (sessionId: string, pinned: boolean) => {
-    await coworkService.setSessionPinned(sessionId, pinned);
-  };
-
-  const handleRenameSession = async (sessionId: string, title: string) => {
-    await coworkService.renameSession(sessionId, title);
+    await coworkService.loadSession(session.id);
   };
 
   const handleEnterBatchMode = useCallback((sessionId: string) => {
@@ -110,6 +118,32 @@ const Sidebar: React.FC<SidebarProps> = ({
     setSelectedIds(new Set());
     setShowBatchDeleteConfirm(false);
   }, []);
+
+  const updateAgentScrollEdges = useCallback((element: HTMLDivElement | null) => {
+    if (!element) {
+      setAgentScrollEdges((previousEdges) => (
+        previousEdges.top || previousEdges.bottom ? { top: false, bottom: false } : previousEdges
+      ));
+      return;
+    }
+
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    const nextEdges = {
+      top: element.scrollTop > 1,
+      bottom: maxScrollTop - element.scrollTop > 1,
+    };
+
+    setAgentScrollEdges((previousEdges) => {
+      if (previousEdges.top === nextEdges.top && previousEdges.bottom === nextEdges.bottom) {
+        return previousEdges;
+      }
+      return nextEdges;
+    });
+  }, []);
+
+  const handleAgentScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    updateAgentScrollEdges(event.currentTarget);
+  }, [updateAgentScrollEdges]);
 
   const handleToggleSelection = useCallback((sessionId: string) => {
     setSelectedIds(prev => {
@@ -144,17 +178,84 @@ const Sidebar: React.FC<SidebarProps> = ({
     handleExitBatchMode();
   }, [selectedIds, handleExitBatchMode]);
 
+  const handleResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isCollapsed) return;
+    event.preventDefault();
+    isResizingRef.current = true;
+    setIsResizing(true);
+    resizeStartXRef.current = event.clientX;
+    resizeStartWidthRef.current = sidebarWidth;
+    document.body.classList.add('select-none');
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const nextWidth = resizeStartWidthRef.current + moveEvent.clientX - resizeStartXRef.current;
+      if (nextWidth < MIN_SIDEBAR_WIDTH) {
+        isResizingRef.current = false;
+        setIsResizing(false);
+        document.body.classList.remove('select-none');
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        onToggleCollapse();
+        return;
+      }
+      setSidebarWidth(Math.min(MAX_SIDEBAR_WIDTH, nextWidth));
+    };
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false;
+      setIsResizing(false);
+      document.body.classList.remove('select-none');
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [isCollapsed, onToggleCollapse, sidebarWidth]);
+
+  useEffect(() => {
+    return () => {
+      document.body.classList.remove('select-none');
+    };
+  }, []);
+
+  useEffect(() => {
+    const element = agentScrollContainerRef.current;
+    if (!element) return;
+
+    updateAgentScrollEdges(element);
+
+    const resizeObserver = new ResizeObserver(() => updateAgentScrollEdges(element));
+    resizeObserver.observe(element);
+    if (element.firstElementChild) {
+      resizeObserver.observe(element.firstElementChild);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [updateAgentScrollEdges]);
+
   return (
     <aside
-      className={`shrink-0 bg-surface-raised flex flex-col sidebar-transition overflow-hidden ${
-        isCollapsed ? 'w-0' : 'w-60'
+      className={`relative shrink-0 overflow-hidden bg-surface-raised ${
+        isResizing ? '' : 'sidebar-transition'
       }`}
+      style={{ width: isCollapsed ? 0 : sidebarWidth }}
     >
+      <div
+        className={`flex h-full flex-col transition-opacity ease-out ${
+          isCollapsed ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+        style={{
+          width: sidebarWidth,
+          transitionDuration: `${SIDEBAR_COLLAPSE_TRANSITION_MS}ms`,
+        }}
+      >
       <div className="pt-3 pb-3">
         <div className="draggable sidebar-header-drag h-8 flex items-center justify-between px-3">
-          <div className={`${isMac ? 'pl-[68px]' : ''}`}>
-            {updateBadge}
-          </div>
+          <div className={`${isMac ? 'pl-[68px]' : ''}`}>{updateBadge}</div>
           <button
             type="button"
             onClick={onToggleCollapse}
@@ -164,17 +265,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             <SidebarToggleIcon className="h-4 w-4" isCollapsed={isCollapsed} />
           </button>
         </div>
-        <div className="mt-3 space-y-1 px-3">
+        <div className="mt-[5px] space-y-0.5 px-3">
           <button
             type="button"
             onClick={onNewChat}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'cowork'
-                ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                : 'text-secondary hover:text-foreground hover:bg-surface-raised'
-            }`}
+            className={sidebarNavItemClassName}
           >
-            <ComposeIcon className="h-4 w-4" />
+            <ComposeIcon className={sidebarCreateIconClassName} />
             {i18nService.t('newChat')}
           </button>
           <button
@@ -183,9 +280,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               onShowCowork();
               setIsSearchOpen(true);
             }}
-            className="w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-secondary hover:text-foreground hover:bg-surface-raised transition-colors"
+            className={sidebarNavItemClassName}
           >
-            <SearchIcon className="h-4 w-4" />
+            <SearchIcon className="h-4 w-4 shrink-0" />
             {i18nService.t('search')}
           </button>
           <button
@@ -194,13 +291,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               setIsSearchOpen(false);
               onShowScheduledTasks();
             }}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'scheduledTasks'
-                ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                : 'text-secondary hover:text-foreground hover:bg-surface-raised'
-            }`}
+            className={activeView === 'scheduledTasks' ? activeSidebarNavItemClassName : sidebarNavItemClassName}
+            aria-current={activeView === 'scheduledTasks' ? 'page' : undefined}
           >
-            <ClockIcon className="h-4 w-4" />
+            <ClockIcon className="h-4 w-4 shrink-0" />
             {i18nService.t('scheduledTasks')}
           </button>
           <button
@@ -209,13 +303,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               setIsSearchOpen(false);
               onShowSkills();
             }}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'skills'
-                ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                : 'text-secondary hover:text-foreground hover:bg-surface-raised'
-            }`}
+            className={activeView === 'skills' ? activeSidebarNavItemClassName : sidebarNavItemClassName}
+            aria-current={activeView === 'skills' ? 'page' : undefined}
           >
-            <PuzzleIcon className="h-4 w-4" />
+            <PuzzleIcon className="h-4 w-4 shrink-0" />
             {i18nService.t('skills')}
           </button>
           <button
@@ -224,63 +315,56 @@ const Sidebar: React.FC<SidebarProps> = ({
               setIsSearchOpen(false);
               onShowMcp();
             }}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'mcp'
-                ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                : 'text-secondary hover:text-foreground hover:bg-surface-raised'
-            }`}
+            className={activeView === 'mcp' ? activeSidebarNavItemClassName : sidebarNavItemClassName}
+            aria-current={activeView === 'mcp' ? 'page' : undefined}
           >
-            <ConnectorIcon className="h-4 w-4" />
+            <ConnectorIcon className="h-4 w-4 shrink-0" />
             {i18nService.t('mcpServers')}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setIsSearchOpen(false);
-              onShowAgents();
-            }}
-            className={`w-full inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-              activeView === 'agents'
-                ? 'bg-primary/10 text-primary hover:bg-primary/20'
-                : 'text-secondary hover:text-foreground hover:bg-surface-raised'
-            }`}
-          >
-            <UserGroupIcon className="h-4 w-4" />
-            {i18nService.t('myAgents')}
-          </button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-2.5 pb-4">
-        <SidebarAgentList
-          onShowCowork={onShowCowork}
-          onSessionsLoadingChange={setSessionsLoading}
-        />
-        <div className="px-3 pb-2 text-sm font-medium text-secondary">
-          {i18nService.t('coworkHistory')}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={agentScrollContainerRef}
+          className="scrollbar-hidden h-full overflow-y-auto px-2.5 pb-10"
+          onScroll={handleAgentScroll}
+        >
+          <MyAgentSidebarTree
+            isBatchMode={isBatchMode}
+            selectedIds={selectedIds}
+            onShowCowork={onShowCowork}
+            onToggleSelection={handleToggleSelection}
+            onEnterBatchMode={handleEnterBatchMode}
+          />
         </div>
-        <CoworkSessionList
-          sessions={filteredSessions}
-          isLoading={sessionsLoading}
-          currentSessionId={currentSessionId}
-          isBatchMode={isBatchMode}
-          selectedIds={selectedIds}
-          onSelectSession={handleSelectSession}
-          onDeleteSession={handleDeleteSession}
-          onTogglePin={handleTogglePin}
-          onRenameSession={handleRenameSession}
-          onToggleSelection={handleToggleSelection}
-          onEnterBatchMode={handleEnterBatchMode}
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-surface-raised to-transparent transition-opacity duration-150 ${
+            agentScrollEdges.top ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-[68px] z-10 h-10 bg-gradient-to-b from-surface-raised to-transparent transition-opacity duration-150 ${
+            agentScrollEdges.top ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+        <div
+          className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 h-16 bg-gradient-to-t from-surface-raised to-transparent transition-opacity duration-150 ${
+            agentScrollEdges.bottom ? 'opacity-100' : 'opacity-0'
+          }`}
         />
       </div>
+      {!isCollapsed && (
+        <div
+          className="non-draggable absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+          onMouseDown={handleResizeStart}
+        />
+      )}
       <CoworkSearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
-        sessions={filteredSessions}
+        sessions={sessions}
         currentSessionId={currentSessionId}
         onSelectSession={handleSelectSession}
-        onDeleteSession={handleDeleteSession}
-        onTogglePin={handleTogglePin}
-        onRenameSession={handleRenameSession}
       />
       {isBatchMode ? (
         <div className="px-3 pb-3 pt-1 flex items-center justify-between">
@@ -317,7 +401,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       ) : (
-        <div className="px-3 pb-3 pt-1 flex items-center gap-1">
+        <div className="px-3 pb-1 pt-1 flex items-center gap-1">
           {!hideLogin && (
             <div className="flex-1 min-w-0">
               <LoginButton />
@@ -326,96 +410,53 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => onShowSettings()}
-            className={`inline-flex items-center justify-start gap-2 rounded-lg px-2.5 py-2 text-sm font-medium text-secondary hover:text-foreground hover:bg-surface-raised transition-colors ${hideLogin ? 'w-full' : 'shrink-0'}`}
+            className={`inline-flex h-7 items-center justify-start gap-2 rounded-md px-1.5 text-[14px] font-normal text-foreground/80 transition-colors hover:bg-black/[0.03] dark:hover:bg-white/[0.04] ${hideLogin ? 'w-full' : 'shrink-0'}`}
             aria-label={i18nService.t('settings')}
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M14 17H5" /><path d="M19 7h-9" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></svg>
+            <Cog6ToothIcon className="h-4 w-4 shrink-0" />
             {i18nService.t('settings')}
           </button>
         </div>
       )}
       {/* Batch Delete Confirmation Modal */}
       {showBatchDeleteConfirm && (
-        <Modal onClose={() => setShowBatchDeleteConfirm(false)} className="w-full max-w-sm mx-4 bg-surface rounded-2xl shadow-xl overflow-hidden">
-            <div className="flex items-center gap-3 px-5 py-4">
-              <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
-                <ExclamationTriangleIcon className="h-5 w-5 text-red-600 dark:text-red-500" />
-              </div>
-              <h2 className="text-base font-semibold text-foreground">
-                {i18nService.t('batchDeleteConfirmTitle')}
-              </h2>
+        <Modal
+          onClose={() => setShowBatchDeleteConfirm(false)}
+          className="w-full max-w-sm mx-4 bg-surface rounded-2xl shadow-xl overflow-hidden"
+        >
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30">
+              <ExclamationTriangleIcon className="h-5 w-5 text-red-600 dark:text-red-500" />
             </div>
-            <div className="px-5 pb-4">
-              <p className="text-sm text-secondary">
-                {i18nService.t('batchDeleteConfirmMessage').replace('{count}', String(selectedIds.size))}
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-border">
-              <button
-                onClick={() => setShowBatchDeleteConfirm(false)}
-                className="px-4 py-2 text-sm font-medium rounded-lg text-secondary hover:bg-surface-raised transition-colors"
-              >
-                {i18nService.t('cancel')}
-              </button>
-              <button
-                onClick={handleBatchDelete}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
-              >
-                {i18nService.t('batchDelete')} ({selectedIds.size})
-              </button>
-            </div>
+            <h2 className="text-base font-semibold text-foreground">
+              {i18nService.t('batchDeleteConfirmTitle')}
+            </h2>
+          </div>
+          <div className="px-5 pb-4">
+            <p className="text-sm text-secondary">
+              {i18nService
+                .t('batchDeleteConfirmMessage')
+                .replace('{count}', String(selectedIds.size))}
+            </p>
+          </div>
+          <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-border">
+            <button
+              onClick={() => setShowBatchDeleteConfirm(false)}
+              className="px-4 py-2 text-sm font-medium rounded-lg text-secondary hover:bg-surface-raised transition-colors"
+            >
+              {i18nService.t('cancel')}
+            </button>
+            <button
+              onClick={handleBatchDelete}
+              className="px-4 py-2 text-sm font-medium rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors"
+            >
+              {i18nService.t('batchDelete')} ({selectedIds.size})
+            </button>
+          </div>
         </Modal>
       )}
-    </aside>
-  );
-};
-
-/* ── Simplified agent list for sidebar quick-switch ─── */
-
-const SidebarAgentList: React.FC<{
-  onShowCowork: () => void;
-  onSessionsLoadingChange: (loading: boolean) => void;
-}> = ({ onShowCowork, onSessionsLoadingChange }) => {
-  const agents = useSelector((state: RootState) => state.agent.agents);
-  const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
-
-  useEffect(() => {
-    agentService.loadAgents();
-  }, []);
-
-  const enabledAgents = agents.filter((a) => a.enabled);
-
-  const handleSwitch = async (agentId: string) => {
-    if (agentId === currentAgentId) return;
-    agentService.switchAgent(agentId);
-    onShowCowork();
-    onSessionsLoadingChange(true);
-    try {
-      await coworkService.loadSessions(agentId);
-    } finally {
-      onSessionsLoadingChange(false);
-    }
-  };
-
-  return (
-    <div className="px-3 pb-2">
-      <div className="space-y-0.5">
-        {enabledAgents.map((agent) => (
-          <div
-            key={agent.id}
-            className={`group flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm cursor-pointer transition-colors ${
-              currentAgentId === agent.id
-                ? 'bg-primary/10 text-primary'
-                : 'text-secondary hover:bg-surface-raised'
-            }`}
-            onClick={() => handleSwitch(agent.id)}
-          >
-            <span className="text-base leading-none">{agent.icon || (agent.id === 'main' ? '🦞' : '🤖')}</span>
-            <span className="truncate flex-1 text-xs font-medium">{agent.name}</span>
-          </div>
-        ))}
       </div>
-    </div>
+    </aside>
   );
 };
 

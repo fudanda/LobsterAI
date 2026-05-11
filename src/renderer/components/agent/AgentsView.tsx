@@ -1,22 +1,22 @@
+import { PlusIcon } from '@heroicons/react/24/outline';
 import React, { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { RootState } from '../../store';
+
 import { agentService } from '../../services/agent';
-import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
-import { PlusIcon } from '@heroicons/react/24/outline';
+import type { RootState } from '../../store';
 import type { PresetAgent } from '../../types/agent';
+import ComposeIcon from '../icons/ComposeIcon';
+import SidebarToggleIcon from '../icons/SidebarToggleIcon';
+import WindowTitleBar from '../window/WindowTitleBar';
+import AgentAvatarIcon from './AgentAvatarIcon';
 import AgentCreateModal from './AgentCreateModal';
 import AgentSettingsPanel from './AgentSettingsPanel';
-import SidebarToggleIcon from '../icons/SidebarToggleIcon';
-import ComposeIcon from '../icons/ComposeIcon';
-import WindowTitleBar from '../window/WindowTitleBar';
 
 interface AgentsViewProps {
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onNewChat?: () => void;
-  onShowCowork?: () => void;
   updateBadge?: React.ReactNode;
 }
 
@@ -24,7 +24,6 @@ const AgentsView: React.FC<AgentsViewProps> = ({
   isSidebarCollapsed,
   onToggleSidebar,
   onNewChat,
-  onShowCowork,
   updateBadge,
 }) => {
   const isMac = window.electron.platform === 'darwin';
@@ -57,12 +56,6 @@ const AgentsView: React.FC<AgentsViewProps> = ({
     } finally {
       setAddingPreset(null);
     }
-  };
-
-  const handleSwitchAgent = (agentId: string) => {
-    agentService.switchAgent(agentId);
-    coworkService.loadSessions(agentId);
-    onShowCowork?.();
   };
 
   return (
@@ -179,10 +172,6 @@ const AgentsView: React.FC<AgentsViewProps> = ({
       <AgentSettingsPanel
         agentId={settingsAgentId}
         onClose={() => setSettingsAgentId(null)}
-        onSwitchAgent={(id) => {
-          setSettingsAgentId(null);
-          handleSwitchAgent(id);
-        }}
       />
     </div>
   );
@@ -206,7 +195,12 @@ const AgentCard: React.FC<{
         : 'border-border'
     }`}
   >
-    <span className="text-3xl">{icon || '🤖'}</span>
+    <AgentAvatarIcon
+      value={icon}
+      className="h-11 w-11"
+      iconClassName="h-[22px] w-[22px]"
+      legacyClassName="text-3xl"
+    />
     <div className="min-w-0 w-full">
       <div className="text-sm font-semibold text-foreground truncate">
         {name}
@@ -230,7 +224,12 @@ const UninstalledPresetCard: React.FC<{
   onAdd: () => void;
 }> = ({ icon, name, description, isAdding, onAdd }) => (
   <div className="flex flex-col items-start gap-2 p-4 rounded-xl border-2 border-dashed border-border opacity-60 hover:opacity-80 transition-opacity min-h-[140px]">
-    <span className="text-3xl">{icon || '🤖'}</span>
+    <AgentAvatarIcon
+      value={icon}
+      className="h-11 w-11"
+      iconClassName="h-[22px] w-[22px]"
+      legacyClassName="text-3xl"
+    />
     <div className="min-w-0 w-full flex-1">
       <div className="text-sm font-semibold text-foreground truncate">
         {name}

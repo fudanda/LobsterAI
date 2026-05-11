@@ -24,10 +24,9 @@ type ResolveAgentModelSelectionResult = {
  * Determine which Model object the prompt input should use for capability
  * checks (e.g. supportsImage).
  *
- * On the **home page** (no sessionId) the header ModelSelector writes
- * directly to globalSelectedModel (Redux), so we must honour that value —
- * otherwise the agent's default model may shadow the user's choice and
- * produce a wrong supportsImage flag (see PR #1850 / #1856 regression).
+ * On the **home page** (no sessionId) the selectors use the current agent's
+ * resolved model. Callers persist user changes to the agent model before
+ * passing that value back here, so image capability checks must honour it.
  *
  * Inside a **session** (has sessionId) the agent-level resolution
  * (session override → agent model → fallback) is authoritative.

@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
-import { XMarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon,XMarkIcon } from '@heroicons/react/24/outline';
+import React, { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+
 import { i18nService } from '../../services/i18n';
-import type { CoworkSession, CoworkMessage } from '../../types/cowork';
+import type { CoworkSession } from '../../types/cowork';
 import {
-  buildDisplayItems,
-  buildConversationTurns,
-  UserMessageItem,
   AssistantTurnBlock,
+  buildConversationTurns,
+  buildDisplayItems,
+  UserMessageItem,
 } from '../cowork/CoworkSessionDetail';
 
 interface RunSessionModalProps {
@@ -39,7 +40,12 @@ const RunSessionModal: React.FC<RunSessionModalProps> = ({ sessionId, sessionKey
       if (sessionId) {
         const result = await window.electron?.cowork?.getSession(sessionId);
         if (result?.success && result.session) {
-          loadedSession = result.session;
+          const s = result.session;
+          loadedSession = {
+            ...s,
+            messagesOffset: s.messagesOffset ?? 0,
+            totalMessages: s.totalMessages ?? s.messages?.length ?? 0,
+          };
         }
       }
 
@@ -47,7 +53,12 @@ const RunSessionModal: React.FC<RunSessionModalProps> = ({ sessionId, sessionKey
       if (!loadedSession && sessionKey) {
         const result = await window.electron?.scheduledTasks?.resolveSession(sessionKey);
         if (result?.success && result.session) {
-          loadedSession = result.session;
+          const s = result.session;
+          loadedSession = {
+            ...s,
+            messagesOffset: s.messagesOffset ?? 0,
+            totalMessages: s.totalMessages ?? s.messages?.length ?? 0,
+          };
         }
       }
 
@@ -126,8 +137,7 @@ const RunSessionModal: React.FC<RunSessionModalProps> = ({ sessionId, sessionKey
     }
   };
 
-  const messages: CoworkMessage[] = session?.messages ?? [];
-  const displayItems = useMemo(() => buildDisplayItems(messages), [messages]);
+  const displayItems = useMemo(() => buildDisplayItems(session?.messages ?? []), [session?.messages]);
   const turns = useMemo(() => buildConversationTurns(displayItems), [displayItems]);
 
   return (

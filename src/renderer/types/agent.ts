@@ -7,9 +7,12 @@ export interface Agent {
   systemPrompt: string;
   identity: string;
   model: string;
+  workingDirectory: string;
   icon: string;
   skillIds: string[];
   enabled: boolean;
+  pinned: boolean;
+  pinOrder?: number | null;
   isDefault: boolean;
   source: AgentSource;
   presetId: string;
@@ -27,7 +30,7 @@ export interface PresetAgent {
   systemPrompt: string;
   systemPromptEn: string;
   skillIds: string[];
-  installed: boolean;
+  installed?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -37,6 +40,7 @@ export interface CreateAgentRequest {
   systemPrompt?: string;
   identity?: string;
   model?: string;
+  workingDirectory?: string;
   icon?: string;
   skillIds?: string[];
   source?: string;
@@ -49,7 +53,9 @@ export interface UpdateAgentRequest {
   systemPrompt?: string;
   identity?: string;
   model?: string;
+  workingDirectory?: string;
   icon?: string;
   skillIds?: string[];
   enabled?: boolean;
+  pinned?: boolean;
 }

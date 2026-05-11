@@ -30,6 +30,7 @@ export type EnterpriseAgentConfig = {
   systemPrompt?: string;
   identity?: string;
   model: string;
+  workingDirectory?: string;
   icon: string;
   skillIds: string[];
   enabled: boolean;

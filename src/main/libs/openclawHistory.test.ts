@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+
 import {
   buildScheduledReminderSystemMessage,
   extractGatewayHistoryEntries,
@@ -6,6 +7,8 @@ import {
   extractGatewayMessageText,
   isHeartbeatAckText,
   isHeartbeatPromptText,
+  isSilentReplyPrefixText,
+  isSilentReplyText,
 } from './openclawHistory';
 
 describe('openclawHistory', () => {
@@ -48,6 +51,20 @@ describe('openclawHistory', () => {
     ).toEqual({
       role: 'assistant',
       text: 'final answer',
+    });
+  });
+
+  test('keeps gateway message timestamps when present', () => {
+    expect(
+      extractGatewayHistoryEntry({
+        role: 'user',
+        content: 'hello',
+        createdAt: '2026-05-09T10:20:30.000Z',
+      })
+    ).toEqual({
+      role: 'user',
+      text: 'hello',
+      timestamp: Date.parse('2026-05-09T10:20:30.000Z'),
     });
   });
 
@@ -150,5 +167,50 @@ Do not infer or repeat old tasks from prior chats.
 If nothing needs attention, reply HEARTBEAT_OK.`)
     ).toBe(true);
     expect(isHeartbeatPromptText('Please read README.md and reply OK.')).toBe(false);
+  });
+
+  test('isSilentReplyText matches exact NO_REPLY token only', () => {
+    expect(isSilentReplyText('NO_REPLY')).toBe(true);
+    expect(isSilentReplyText('  NO_REPLY  ')).toBe(true);
+    expect(isSilentReplyText('no_reply')).toBe(true);
+    expect(isSilentReplyText('This is a message ending with NO_REPLY')).toBe(false);
+    expect(isSilentReplyText('NO_REPLY: explanation')).toBe(false);
+    expect(isSilentReplyText('NO')).toBe(false);
+    expect(isSilentReplyText('')).toBe(false);
+  });
+
+  test('shouldSuppressHeartbeatText suppresses NO_REPLY for assistant and system', () => {
+    // Imported at module level, test via extractGatewayHistoryEntry
+    const entry = extractGatewayHistoryEntry({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'NO_REPLY' }],
+    });
+    expect(entry).toBeNull();
+  });
+
+  test('shouldSuppressHeartbeatText does not suppress user NO_REPLY', () => {
+    const entry = extractGatewayHistoryEntry({
+      role: 'user',
+      content: 'NO_REPLY',
+    });
+    expect(entry).toEqual({ role: 'user', text: 'NO_REPLY' });
+  });
+
+  test('isSilentReplyPrefixText matches streaming prefix fragments', () => {
+    expect(isSilentReplyPrefixText('NO')).toBe(true);
+    expect(isSilentReplyPrefixText('NO_')).toBe(true);
+    expect(isSilentReplyPrefixText('NO_R')).toBe(true);
+    expect(isSilentReplyPrefixText('NO_RE')).toBe(true);
+    expect(isSilentReplyPrefixText('NO_REP')).toBe(true);
+    expect(isSilentReplyPrefixText('NO_REPL')).toBe(true);
+  });
+
+  test('isSilentReplyPrefixText rejects non-prefix text', () => {
+    expect(isSilentReplyPrefixText('')).toBe(false);
+    expect(isSilentReplyPrefixText('N')).toBe(false);
+    expect(isSilentReplyPrefixText('No')).toBe(false);
+    expect(isSilentReplyPrefixText('NO,')).toBe(false);
+    expect(isSilentReplyPrefixText('NOT')).toBe(false);
+    expect(isSilentReplyPrefixText('hello')).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect,useState } from 'react';
+
 import { i18nService } from '../../services/i18n';
-import { McpServerConfig, McpServerFormData, McpRegistryEntry } from '../../types/mcp';
+import { McpRegistryEntry,McpServerConfig, McpServerFormData } from '../../types/mcp';
 import Modal from '../common/Modal';
 
 interface McpServerFormModalProps {
@@ -255,7 +256,7 @@ const McpServerFormModal: React.FC<McpServerFormModalProps> = ({
         <div className="space-y-4">
           {/* Name */}
           <div className="space-y-1.5">
-            <label className={labelClass}>{i18nService.t('mcpServerName')}</label>
+            <label className={labelClass}>{i18nService.t('mcpServerName')}<span className="text-red-500 dark:text-red-400 ml-0.5">*</span></label>
             <input
               type="text"
               value={name}
@@ -298,7 +299,7 @@ const McpServerFormModal: React.FC<McpServerFormModalProps> = ({
           {transportType === 'stdio' && (
             <>
               <div className="space-y-1.5">
-                <label className={labelClass}>{i18nService.t('mcpCommand')}</label>
+                <label className={labelClass}>{i18nService.t('mcpCommand')}<span className="text-red-500 dark:text-red-400 ml-0.5">*</span></label>
                 <input
                   type="text"
                   value={command}
@@ -392,7 +393,7 @@ const McpServerFormModal: React.FC<McpServerFormModalProps> = ({
           {(transportType === 'sse' || transportType === 'http') && (
             <>
               <div className="space-y-1.5">
-                <label className={labelClass}>{i18nService.t('mcpUrl')}</label>
+                <label className={labelClass}>{i18nService.t('mcpUrl')}<span className="text-red-500 dark:text-red-400 ml-0.5">*</span></label>
                 <input
                   type="text"
                   value={url}

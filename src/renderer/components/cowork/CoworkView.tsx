@@ -3,6 +3,7 @@ import React, { useEffect, useRef,useState } from 'react';
 import { useDispatch,useSelector } from 'react-redux';
 
 import { buildSessionTitleFromInput } from '../../../common/sessionTitle';
+import { agentService } from '../../services/agent';
 import { coworkService } from '../../services/cowork';
 import { i18nService } from '../../services/i18n';
 import { quickActionService } from '../../services/quickAction';
@@ -13,7 +14,6 @@ import {
   selectIsStreaming,
 } from '../../store/selectors/coworkSelectors';
 import { addMessage, clearCurrentSession, setCurrentSession, setStreaming, updateSessionStatus } from '../../store/slices/coworkSlice';
-import { setSelectedModel } from '../../store/slices/modelSlice';
 import { clearSelection,selectAction, setActions } from '../../store/slices/quickActionSlice';
 import { clearActiveSkills, setActiveSkillIds } from '../../store/slices/skillSlice';
 import type { CoworkImageAttachment, CoworkSession, OpenClawEngineStatus } from '../../types/cowork';
@@ -27,6 +27,7 @@ import WindowTitleBar from '../window/WindowTitleBar';
 import { useAgentSelectedModel } from './agentModelSelection';
 import CoworkPromptInput, { type CoworkPromptInputRef } from './CoworkPromptInput';
 import CoworkSessionDetail from './CoworkSessionDetail';
+import { usePersistAgentModelSelection } from './usePersistAgentModelSelection';
 
 export interface CoworkViewProps {
   onRequestAppSettings?: (options?: SettingsOpenOptions) => void;
@@ -67,7 +68,15 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
   const currentAgentId = useSelector((state: RootState) => state.agent.currentAgentId);
   const agents = useSelector((state: RootState) => state.agent.agents);
   const currentAgent = agents.find((agent) => agent.id === currentAgentId);
+  const currentAgentWorkingDirectory = currentAgent?.workingDirectory?.trim() || config.workingDirectory || '';
   const currentAgentSelectedModel = useAgentSelectedModel(currentAgentId, currentAgent?.model ?? '');
+  const {
+    isPersistingAgentModel,
+    persistAgentModelSelection,
+  } = usePersistAgentModelSelection({
+    agentId: currentAgentId,
+    syncDefaultModel: currentAgentId === 'main' || currentAgent?.isDefault === true,
+  });
 
   const buildApiConfigNotice = (error?: string): { noticeI18nKey: string; noticeExtra?: string } => {
     const key = 'coworkModelSettingsRequired';
@@ -231,7 +240,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
         pinned: false,
         createdAt: now,
         updatedAt: now,
-        cwd: config.workingDirectory || '',
+        cwd: currentAgentWorkingDirectory,
         systemPrompt: '',
         modelOverride: currentAgentSelectedModel ? toOpenClawModelRef(currentAgentSelectedModel) : '',
         executionMode: config.executionMode || 'local',
@@ -251,6 +260,8 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
               : undefined,
           },
         ],
+        messagesOffset: 0,
+        totalMessages: 1,
       };
 
       // Immediately show the session detail page with user message
@@ -277,7 +288,7 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
       const { session: startedSession, error: startError } = await coworkService.startSession({
         prompt,
         title: fallbackTitle,
-        cwd: config.workingDirectory || undefined,
+        cwd: currentAgentWorkingDirectory || undefined,
         systemPrompt: combinedSystemPrompt,
         activeSkillIds: sessionSkillIds,
         agentId: currentAgentId,
@@ -366,14 +377,6 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
       pendingStartRef.current.cancellationAction = 'stop';
     }
     await coworkService.stopSession(currentSession.id);
-  };
-
-  const handleDeleteSession = async (sessionId: string) => {
-    if (sessionId.startsWith('temp-') && pendingStartRef.current) {
-      pendingStartRef.current.cancelled = true;
-      pendingStartRef.current.cancellationAction = 'delete';
-    }
-    await coworkService.deleteSession(sessionId);
   };
 
   // Get selected quick action
@@ -484,10 +487,11 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
           </div>
         )}
         <ModelSelector
+          disabled={isPersistingAgentModel}
           value={currentAgentSelectedModel}
           onChange={async (nextModel) => {
             if (!nextModel) return;
-            dispatch(setSelectedModel({ agentId: currentAgentId, model: nextModel }));
+            await persistAgentModelSelection(nextModel);
           }}
         />
       </div>
@@ -538,8 +542,6 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
           onManageSkills={() => onShowSkills?.()}
           onContinue={handleContinueSession}
           onStop={handleStopSession}
-          onDeleteSession={handleDeleteSession}
-          onNavigateHome={() => dispatch(clearCurrentSession())}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={onToggleSidebar}
           onNewChat={onNewChat}
@@ -559,22 +561,31 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
       {homeHeader}
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-5xl w-full min-w-[320px] mx-auto px-4 pt-[15vh] pb-8 space-y-10">
-          {/* Welcome Section */}
+      <div className="flex-1 overflow-y-auto min-h-0 relative">
+        <div className="relative max-w-5xl w-full min-w-[320px] mx-auto px-4 pt-[15vh] pb-8 space-y-10">
+          {/* Welcome Section - staggered entrance animation */}
           <div className="text-center space-y-5">
-            <img src="logo.png" alt="logo" className="w-16 h-16 mx-auto" />
-            <h2 className="text-3xl font-bold tracking-tight text-foreground">
+            <img src="logo.png" alt="logo" className="w-16 h-16 mx-auto animate-fade-in-up" />
+            <h2
+              className="text-3xl font-bold tracking-tight text-foreground animate-fade-in-up"
+              style={{ animationDelay: '60ms', animationFillMode: 'both' }}
+            >
               {i18nService.t('coworkWelcome')}
             </h2>
-            <p className="text-sm text-secondary max-w-md mx-auto">
+            <p
+              className="text-sm text-secondary max-w-md mx-auto animate-fade-in-up"
+              style={{ animationDelay: '120ms', animationFillMode: 'both' }}
+            >
               {i18nService.t('coworkDescription')}
             </p>
           </div>
 
           {/* Prompt Input Area - Large version with folder selector */}
-          <div className="max-w-3xl mx-auto w-full space-y-3">
-            <div className="shadow-glow-accent rounded-2xl">
+          <div
+            className="max-w-3xl mx-auto w-full space-y-3 animate-fade-in-up"
+            style={{ animationDelay: '200ms', animationFillMode: 'both' }}
+          >
+            <div className="rounded-2xl">
               <CoworkPromptInput
                 ref={promptInputRef}
                 onSubmit={handleStartSession}
@@ -583,9 +594,9 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
                 disabled={!isEngineReady}
                 placeholder={i18nService.t('coworkPlaceholder')}
                 size="large"
-                workingDirectory={config.workingDirectory}
+                workingDirectory={currentAgentWorkingDirectory}
                 onWorkingDirectoryChange={async (dir: string) => {
-                  await coworkService.updateConfig({ workingDirectory: dir });
+                  await agentService.updateAgent(currentAgentId, { workingDirectory: dir });
                 }}
                 showFolderSelector={true}
                 onManageSkills={() => onShowSkills?.()}
@@ -594,7 +605,10 @@ const CoworkView: React.FC<CoworkViewProps> = ({ onRequestAppSettings, onShowSki
           </div>
 
           {/* Quick Actions */}
-          <div className="max-w-3xl mx-auto w-full space-y-4">
+          <div
+            className="max-w-3xl mx-auto w-full space-y-4 animate-fade-in-up"
+            style={{ animationDelay: '300ms', animationFillMode: 'both' }}
+          >
             {selectedAction ? (
               <PromptPanel
                 action={selectedAction}

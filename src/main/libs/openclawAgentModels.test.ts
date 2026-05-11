@@ -1,5 +1,8 @@
+import path from 'node:path';
+
 import { describe, expect, test } from 'vitest';
 
+import { DefaultAgentAvatarIcon } from '../../shared/agent/avatar';
 import {
   buildAgentEntry,
   buildManagedAgentEntries,
@@ -17,6 +20,7 @@ describe('buildAgentEntry', () => {
       systemPrompt: '',
       identity: '',
       model: 'lobsterai-server/deepseek-v3.2',
+      workingDirectory: '',
       icon: '',
       skillIds: [],
       enabled: true,
@@ -42,6 +46,7 @@ describe('buildAgentEntry', () => {
       systemPrompt: '',
       identity: '',
       model: 'openai/gpt-5.3-codex',
+      workingDirectory: '',
       icon: '',
       skillIds: [],
       enabled: true,
@@ -70,6 +75,7 @@ describe('buildAgentEntry', () => {
       systemPrompt: '',
       identity: '',
       model: 'deepseek-v3.2',
+      workingDirectory: '',
       icon: '',
       skillIds: [],
       enabled: true,
@@ -85,6 +91,55 @@ describe('buildAgentEntry', () => {
       model: { primary: 'anthropic/claude-sonnet-4' },
     });
   });
+
+  test('emits per-agent cwd when a working directory is configured', () => {
+    const result = buildAgentEntry({
+      id: 'docs',
+      name: 'Docs',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: '',
+      workingDirectory: '/tmp/docs-project',
+      icon: '',
+      skillIds: [],
+      enabled: true,
+      isDefault: false,
+      source: 'custom',
+      presetId: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'anthropic/claude-sonnet-4');
+
+    expect(result).toMatchObject({
+      id: 'docs',
+      cwd: path.resolve('/tmp/docs-project'),
+    });
+  });
+
+  test('does not forward designed avatar metadata as an OpenClaw emoji', () => {
+    const result = buildAgentEntry({
+      id: 'designer',
+      name: 'Designer',
+      description: '',
+      systemPrompt: '',
+      identity: '',
+      model: '',
+      workingDirectory: '',
+      icon: DefaultAgentAvatarIcon,
+      skillIds: [],
+      enabled: true,
+      isDefault: false,
+      source: 'custom',
+      presetId: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }, 'anthropic/claude-sonnet-4');
+
+    const identity = result.identity as Record<string, unknown>;
+    expect(identity.name).toBe('Designer');
+    expect(identity.emoji).toBeUndefined();
+  });
 });
 
 describe('buildManagedAgentEntries', () => {
@@ -98,6 +153,7 @@ describe('buildManagedAgentEntries', () => {
           systemPrompt: '',
           identity: '',
           model: 'openai/gpt-4o',
+          workingDirectory: '',
           icon: '✍️',
           skillIds: ['docx'],
           enabled: true,
@@ -128,6 +184,7 @@ describe('buildManagedAgentEntries', () => {
           systemPrompt: '',
           identity: '',
           model: '',
+          workingDirectory: '',
           icon: '✍️',
           skillIds: [],
           enabled: true,
@@ -157,6 +214,7 @@ describe('buildManagedAgentEntries', () => {
           systemPrompt: '',
           identity: '',
           model: 'openai/gpt-4o',
+          workingDirectory: '',
           icon: '🦀',
           skillIds: [],
           enabled: true,

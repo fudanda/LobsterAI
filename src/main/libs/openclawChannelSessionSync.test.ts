@@ -76,25 +76,34 @@ test('channel sync still recognizes real channel session keys', () => {
 
 test('channel sync stores the real OpenClaw session key when creating a mapping', () => {
   const createSessionMapping = vi.fn();
+  const getDefaultCwd = vi.fn((agentId?: string) => `/tmp/${agentId || 'fallback'}`);
+  const createSession = vi.fn((
+    title: string,
+    cwd: string,
+    systemPrompt: string,
+    executionMode: 'local',
+    activeSkillIds: string[],
+    agentId: string,
+  ) => ({
+    id: 'cowork-1',
+    title,
+    claudeSessionId: null,
+    status: 'idle' as const,
+    pinned: false,
+    cwd,
+    systemPrompt,
+    modelOverride: '',
+    executionMode,
+    activeSkillIds,
+    agentId,
+    messages: [],
+    createdAt: 1,
+    updatedAt: 1,
+  }));
   const sync = new OpenClawChannelSessionSync({
     coworkStore: {
       getSession: () => null,
-      createSession: () => ({
-        id: 'cowork-1',
-        title: '[Feishu] ou_123',
-        claudeSessionId: null,
-        status: 'idle',
-        pinned: false,
-        cwd: '/tmp',
-        systemPrompt: '',
-        modelOverride: '',
-        executionMode: 'local',
-        activeSkillIds: [],
-        agentId: 'main',
-        messages: [],
-        createdAt: 1,
-        updatedAt: 1,
-      }),
+      createSession,
     },
     imStore: {
       getIMSettings: () => ({ skillsEnabled: true }),
@@ -103,12 +112,21 @@ test('channel sync stores the real OpenClaw session key when creating a mapping'
       deleteSessionMapping: () => {},
       createSessionMapping,
     },
-    getDefaultCwd: () => '/tmp',
+    getDefaultCwd,
   });
 
   const sessionKey = 'agent:main:feishu:dm:ou_123';
 
   expect(sync.resolveOrCreateSession(sessionKey)).toBe('cowork-1');
+  expect(getDefaultCwd).toHaveBeenCalledWith('main');
+  expect(createSession).toHaveBeenCalledWith(
+    expect.any(String),
+    '/tmp/main',
+    '',
+    'local',
+    [],
+    'main',
+  );
   expect(createSessionMapping).toHaveBeenCalledWith(
     'dm:ou_123',
     'feishu',

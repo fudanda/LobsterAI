@@ -1,17 +1,21 @@
 import { classifyErrorKey } from '../../common/coworkErrorClassify';
 import type { OpenClawSessionPatch } from '../../common/openclawSession';
+import { COWORK_SESSION_PAGE_SIZE } from '../../shared/cowork/constants';
 import { store } from '../store';
 import {
   addMessage,
   addSession,
+  appendSessions,
   clearCurrentSession,
   clearPendingPermissions,
   deleteSession as deleteSessionAction,
   deleteSessions as deleteSessionsAction,
   dequeuePendingPermission,
   enqueuePendingPermission,
+  prependMessages,
   setConfig,
   setCurrentSession,
+  setHasMoreSessions,
   setRemoteManaged,
   setSessions,
   setStreaming,
@@ -27,6 +31,7 @@ import type {
   CoworkMemoryStats,
   CoworkPermissionResult,
   CoworkSession,
+  CoworkSessionListResult,
   CoworkStartOptions,
   CoworkUserMemoryEntry,
   OpenClawEngineStatus,
@@ -115,8 +120,8 @@ class CoworkService {
     this.streamListenerCleanups.push(messageCleanup);
 
     // Message update listener (for streaming content updates)
-    const messageUpdateCleanup = cowork.onStreamMessageUpdate(({ sessionId, messageId, content }) => {
-      store.dispatch(updateMessageContent({ sessionId, messageId, content }));
+    const messageUpdateCleanup = cowork.onStreamMessageUpdate(({ sessionId, messageId, content, metadata }) => {
+      store.dispatch(updateMessageContent({ sessionId, messageId, content, metadata }));
     });
     this.streamListenerCleanups.push(messageUpdateCleanup);
 
@@ -214,7 +219,7 @@ class CoworkService {
 
   async loadSessions(agentId?: string): Promise<void> {
     const requestId = ++this.latestLoadSessionsRequestId;
-    const result = await window.electron?.cowork?.listSessions(agentId);
+    const result = await window.electron?.cowork?.listSessions({ limit: COWORK_SESSION_PAGE_SIZE, offset: 0, agentId });
     if (result?.success && result.sessions) {
       // High-frequency IM traffic can trigger overlapping list refreshes.
       // Ignore stale responses so an older snapshot does not hide newer sessions.
@@ -222,7 +227,35 @@ class CoworkService {
         return;
       }
       store.dispatch(setSessions(result.sessions));
+      store.dispatch(setHasMoreSessions(result.hasMore ?? false));
     }
+  }
+
+  async listSessionsForAgentPreview(
+    agentId: string,
+    limit: number,
+    offset: number,
+  ): Promise<CoworkSessionListResult> {
+    const result = await window.electron?.cowork?.listSessions({ limit, offset, agentId });
+    return result ?? { success: false, error: 'Cowork IPC is unavailable' };
+  }
+
+  async listSessionsForSearch(limit: number, offset: number): Promise<CoworkSessionListResult> {
+    const result = await window.electron?.cowork?.listSessions({ limit, offset });
+    return result ?? { success: false, error: 'Cowork IPC is unavailable' };
+  }
+
+  async loadMoreSessions(): Promise<boolean> {
+    const state = store.getState().cowork;
+    if (!state.hasMoreSessions) return false;
+
+    const offset = state.sessions.length;
+    const result = await window.electron?.cowork?.listSessions({ limit: COWORK_SESSION_PAGE_SIZE, offset });
+    if (result?.success && result.sessions) {
+      store.dispatch(appendSessions({ sessions: result.sessions, hasMore: result.hasMore ?? false }));
+      return true;
+    }
+    return false;
   }
 
   async loadConfig(): Promise<void> {
@@ -391,18 +424,19 @@ class CoworkService {
     return false;
   }
 
-  async setSessionPinned(sessionId: string, pinned: boolean): Promise<boolean> {
+  async setSessionPinned(sessionId: string, pinned: boolean): Promise<{ success: boolean; pinOrder: number | null }> {
     const cowork = window.electron?.cowork;
-    if (!cowork?.setSessionPinned) return false;
+    if (!cowork?.setSessionPinned) return { success: false, pinOrder: null };
 
     const result = await cowork.setSessionPinned({ sessionId, pinned });
     if (result.success) {
-      store.dispatch(updateSessionPinned({ sessionId, pinned }));
-      return true;
+      const pinOrder = result.pinOrder ?? null;
+      store.dispatch(updateSessionPinned({ sessionId, pinned, pinOrder }));
+      return { success: true, pinOrder };
     }
 
     console.error('Failed to update session pin:', result.error);
-    return false;
+    return { success: false, pinOrder: null };
   }
 
   async renameSession(sessionId: string, title: string): Promise<boolean> {
@@ -505,6 +539,29 @@ class CoworkService {
 
     console.error('Failed to load session:', result.error);
     return null;
+  }
+
+  /** Load older messages for the current session (for scroll-up history). */
+  async loadMoreMessages(sessionId: string): Promise<boolean> {
+    const cowork = window.electron?.cowork;
+    if (!cowork?.getSessionMessages) return false;
+
+    const state = store.getState().cowork;
+    if (state.currentSession?.id !== sessionId) return false;
+
+    const currentOffset = state.currentSession.messagesOffset;
+    if (currentOffset <= 0) return false;
+
+    const PAGE_SIZE = 50;
+    const newOffset = Math.max(0, currentOffset - PAGE_SIZE);
+    const limit = currentOffset - newOffset;
+
+    const result = await cowork.getSessionMessages({ sessionId, limit, offset: newOffset });
+    if (result.success && result.messages && result.messages.length > 0) {
+      store.dispatch(prependMessages({ sessionId, messages: result.messages, newOffset }));
+      return true;
+    }
+    return false;
   }
 
   async patchSession(sessionId: string, patch: OpenClawSessionPatch): Promise<CoworkSession | null> {

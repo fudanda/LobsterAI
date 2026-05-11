@@ -1,29 +1,40 @@
 import { ipcMain } from 'electron';
+
 import {
-  IpcChannel as ScheduledTaskIpc,
   DeliveryMode as STDeliveryMode,
-  SessionTarget as STSessionTarget,
+  IpcChannel as ScheduledTaskIpc,
   PayloadKind as STPayloadKind,
+  SessionTarget as STSessionTarget,
 } from '../../../scheduledTask/constants';
-import { PlatformRegistry } from '../../../shared/platform';
 import type { CronJobService } from '../../../scheduledTask/cronJobService';
+import { PlatformRegistry } from '../../../shared/platform';
 import { listScheduledTaskChannels } from './helpers';
 
 export interface ScheduledTaskHandlerDeps {
   getCronJobService: () => CronJobService;
   getIMGatewayManager: () => {
-    getIMStore: () => {
-      getSessionMapping: (conversationId: string, platform: string) => {
-        coworkSessionId: string;
-      } | undefined;
-      listSessionMappings: (platform: string, agentId?: string) => Array<{
-        imConversationId: string;
-        platform: string;
-        coworkSessionId: string;
-        agentId: string;
-        lastActiveAt: string;
-      }>;
-    } | undefined;
+    getIMStore: () =>
+      | {
+          getSessionMapping: (
+            conversationId: string,
+            platform: string,
+          ) =>
+            | {
+                coworkSessionId: string;
+              }
+            | undefined;
+          listSessionMappings: (
+            platform: string,
+            agentId?: string,
+          ) => Array<{
+            imConversationId: string;
+            platform: string;
+            coworkSessionId: string;
+            agentId: string;
+            lastActiveAt: string;
+          }>;
+        }
+      | undefined;
     primeConversationReplyRoute: (
       platform: string,
       conversationId: string,
@@ -67,7 +78,12 @@ async function applyAnnounceDeliveryNormalization(
   const colonIdx = rawTo.lastIndexOf(':');
   if (colonIdx > 0) {
     delivery.to = rawTo.slice(colonIdx + 1);
-    console.debug('[ScheduledTask] stripped IM subtype prefix from delivery.to:', rawTo, '->', delivery.to);
+    console.debug(
+      '[ScheduledTask] stripped IM subtype prefix from delivery.to:',
+      rawTo,
+      '->',
+      delivery.to,
+    );
   }
 
   if (platform === 'dingtalk') {
@@ -75,7 +91,9 @@ async function applyAnnounceDeliveryNormalization(
     const mapping = imStore?.getSessionMapping(rawTo, platform);
     if (mapping) {
       await getIMGatewayManager()!.primeConversationReplyRoute(
-        platform, rawTo, mapping.coworkSessionId,
+        platform,
+        rawTo,
+        mapping.coworkSessionId,
       );
     }
   }
@@ -95,7 +113,10 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       const tasks = await getCronJobService().listJobs();
       return { success: true, tasks };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to list tasks' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list tasks',
+      };
     }
   });
 
@@ -104,7 +125,10 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       const task = await getCronJobService().getJob(id);
       return { success: true, task };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to get task' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to get task',
+      };
     }
   });
 
@@ -118,21 +142,31 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       console.log('[IPC][scheduledTask:create] result task id:', task?.id, 'name:', task?.name);
       return { success: true, task };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to create task' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create task',
+      };
     }
   });
 
   ipcMain.handle(ScheduledTaskIpc.Update, async (_event, id: string, input: any) => {
     try {
       const normalizedInput = input && typeof input === 'object' ? { ...input } : {};
-      console.debug('[ScheduledTask] update input id:', id, JSON.stringify(normalizedInput, null, 2));
+      console.debug(
+        '[ScheduledTask] update input id:',
+        id,
+        JSON.stringify(normalizedInput, null, 2),
+      );
       await applyAnnounceDeliveryNormalization(normalizedInput, getIMGatewayManager);
 
       const task = await getCronJobService().updateJob(id, normalizedInput);
       console.log('[IPC][scheduledTask:update] result task id:', task?.id, 'name:', task?.name);
       return { success: true, task };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to update task' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update task',
+      };
     }
   });
 
@@ -141,7 +175,10 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       await getCronJobService().removeJob(id);
       return { success: true, result: true };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to delete task' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete task',
+      };
     }
   });
 
@@ -150,7 +187,10 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       const task = await getCronJobService().toggleJob(id, enabled);
       return { success: true, task };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to toggle task' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to toggle task',
+      };
     }
   });
 
@@ -166,41 +206,63 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
   });
 
   ipcMain.handle(ScheduledTaskIpc.Stop, async (_event, _id: string) => {
-    try {
-      // OpenClaw doesn't expose a direct stop API for running cron jobs
-      // The job will complete or timeout on its own
-      return { success: true, result: false };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to stop task' };
-    }
+    // OpenClaw doesn't expose a direct stop API for running cron jobs
+    // The job will complete or timeout on its own
+    return { success: true, result: false };
   });
 
-  ipcMain.handle(ScheduledTaskIpc.ListRuns, async (_event, taskId: string, limit?: number, offset?: number) => {
-    try {
-      const runs = await getCronJobService().listRuns(taskId, limit, offset);
-      return { success: true, runs };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to list runs' };
-    }
-  });
+  ipcMain.handle(
+    ScheduledTaskIpc.ListRuns,
+    async (
+      _event,
+      taskId: string,
+      limit?: number,
+      offset?: number,
+      filter?: import('../../../scheduledTask/types').RunFilter,
+    ) => {
+      try {
+        const runs = await getCronJobService().listRuns(taskId, limit, offset, filter);
+        return { success: true, runs };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to list runs',
+        };
+      }
+    },
+  );
 
   ipcMain.handle(ScheduledTaskIpc.CountRuns, async (_event, taskId: string) => {
     try {
       const count = await getCronJobService().countRuns(taskId);
       return { success: true, count };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to count runs' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to count runs',
+      };
     }
   });
 
-  ipcMain.handle(ScheduledTaskIpc.ListAllRuns, async (_event, limit?: number, offset?: number) => {
-    try {
-      const runs = await getCronJobService().listAllRuns(limit, offset);
-      return { success: true, runs };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to list all runs' };
-    }
-  });
+  ipcMain.handle(
+    ScheduledTaskIpc.ListAllRuns,
+    async (
+      _event,
+      limit?: number,
+      offset?: number,
+      filter?: import('../../../scheduledTask/types').RunFilter,
+    ) => {
+      try {
+        const runs = await getCronJobService().listAllRuns(limit, offset, filter);
+        return { success: true, runs };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to list all runs',
+        };
+      }
+    },
+  );
 
   ipcMain.handle(ScheduledTaskIpc.ResolveSession, async (_event, sessionKey: string) => {
     try {
@@ -209,7 +271,10 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
       const session = await getOpenClawRuntimeAdapter()?.fetchSessionByKey(sessionKey);
       return { success: true, session: session ?? null };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to resolve session' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to resolve session',
+      };
     }
   });
 
@@ -217,29 +282,35 @@ export function registerScheduledTaskHandlers(deps: ScheduledTaskHandlerDeps): v
     try {
       return { success: true, channels: listScheduledTaskChannels() };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to list channels' };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to list channels',
+      };
     }
   });
 
   ipcMain.handle(
     ScheduledTaskIpc.ListChannelConversations,
     async (_event, channel: string, accountId?: string, filterAccountId?: string) => {
-    try {
-      const platform = PlatformRegistry.platformOfChannel(channel);
-      if (!platform) return { success: true, conversations: [] };
-      const imStore = getIMGatewayManager()?.getIMStore();
-      if (!imStore) return { success: true, conversations: [] };
-      const mappings = imStore.listSessionMappings(platform, filterAccountId ?? accountId);
-      const conversations = mappings.map((m) => ({
-        conversationId: m.imConversationId,
-        platform: m.platform,
-        coworkSessionId: m.coworkSessionId,
-        lastActiveAt: m.lastActiveAt,
-      }));
-      return { success: true, conversations };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to list conversations' };
-    }
+      try {
+        const platform = PlatformRegistry.platformOfChannel(channel);
+        if (!platform) return { success: true, conversations: [] };
+        const imStore = getIMGatewayManager()?.getIMStore();
+        if (!imStore) return { success: true, conversations: [] };
+        const mappings = imStore.listSessionMappings(platform, filterAccountId ?? accountId);
+        const conversations = mappings.map(m => ({
+          conversationId: m.imConversationId,
+          platform: m.platform,
+          coworkSessionId: m.coworkSessionId,
+          lastActiveAt: m.lastActiveAt,
+        }));
+        return { success: true, conversations };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to list conversations',
+        };
+      }
     },
   );
 }

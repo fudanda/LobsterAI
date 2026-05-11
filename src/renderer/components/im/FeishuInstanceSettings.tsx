@@ -3,14 +3,15 @@
  * Configuration form for a single Feishu bot instance in multi-instance mode
  */
 
-import React, { useState, useRef, useEffect } from 'react';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { ArrowPathIcon, CheckCircleIcon, SignalIcon, XCircleIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import TrashIcon from '../icons/TrashIcon';
-import { QRCodeSVG } from 'qrcode.react';
-import type { FeishuInstanceConfig, FeishuInstanceStatus, FeishuOpenClawConfig, IMConnectivityTestResult } from '../../types/im';
-import { i18nService } from '../../services/i18n';
 import { PlatformRegistry } from '@shared/platform';
+import { QRCodeSVG } from 'qrcode.react';
+import React, { useEffect,useRef, useState } from 'react';
+
+import { i18nService } from '../../services/i18n';
+import type { FeishuInstanceConfig, FeishuInstanceStatus, FeishuOpenClawConfig, IMConnectivityTestResult } from '../../types/im';
+import TrashIcon from '../icons/TrashIcon';
 
 interface FeishuInstanceSettingsProps {
   instance: FeishuInstanceConfig;
@@ -222,7 +223,7 @@ const FeishuInstanceSettings: React.FC<FeishuInstanceSettingsProps> = ({
   React.useEffect(() => {
     setNameValue(instance.instanceName);
     setEditingName(false);
-  }, [instance.instanceId]);
+  }, [instance.instanceId, instance.instanceName]);
 
   const handleNameBlur = () => {
     setEditingName(false);
@@ -384,7 +385,7 @@ const FeishuInstanceSettings: React.FC<FeishuInstanceSettingsProps> = ({
       {/* App ID */}
       <div className="space-y-1.5">
         <label className="block text-xs font-medium text-secondary">
-          App ID
+          App ID<span className="text-red-500 dark:text-red-400 ml-0.5">*</span>
         </label>
         <div className="relative">
           <input
@@ -413,7 +414,7 @@ const FeishuInstanceSettings: React.FC<FeishuInstanceSettingsProps> = ({
       {/* App Secret */}
       <div className="space-y-1.5">
         <label className="block text-xs font-medium text-secondary">
-          App Secret
+          App Secret<span className="text-red-500 dark:text-red-400 ml-0.5">*</span>
         </label>
         <div className="relative">
           <input

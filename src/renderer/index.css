@@ -31,6 +31,18 @@ pre {
   overflow-x: auto !important;
 }
 
+/* CodeMirror: reset global pre/code overrides inside CM editor */
+.cm-editor pre {
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+.cm-editor code {
+  font-family: inherit;
+}
+
 code {
   font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, 'Courier New', monospace;
 }
@@ -69,7 +81,7 @@ blockquote {
 }
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Helvetica Neue', 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.6;
   font-weight: 400;
 
@@ -113,6 +125,15 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--lobster-scroll-thumb-hover);
+}
+
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
 }
 
 /* Style for select options to match theme */
@@ -171,9 +192,10 @@ select::-ms-expand {
   background-color: var(--lobster-surface-raised);
 }
 
-/* Sidebar width transition - instant toggle, no animation */
+/* Sidebar width transition */
 .sidebar-transition {
-  transition: none;
+  transition: width 200ms ease-out;
+  will-change: width;
 }
 
 /* Subtle separator line */
@@ -220,7 +242,7 @@ select::-ms-expand {
   height: 2px;
   overflow: hidden;
   border-radius: 1px;
-  background: rgba(59,130,246,0.1);
+  background: var(--lobster-primary-muted);
 }
 .streaming-bar::before {
   content: '';
@@ -230,7 +252,8 @@ select::-ms-expand {
   height: 100%;
   width: 40%;
   border-radius: 1px;
-  background: linear-gradient(90deg, rgba(59,130,246,0.3) 0%, rgba(59,130,246,0.8) 50%, rgba(59,130,246,0.3) 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--lobster-primary) 50%, transparent 100%);
+  opacity: 0.7;
   animation: streaming-slide 1.5s ease-in-out infinite;
 }
 /* Streaming bar glow uses primary color */
@@ -240,4 +263,15 @@ select::-ms-expand {
 @keyframes streaming-slide {
   0% { left: -40%; }
   100% { left: 100%; }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

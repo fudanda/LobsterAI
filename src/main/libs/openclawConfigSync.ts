@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { buildScheduledTaskEnginePrompt } from '../../scheduledTask/enginePrompt';
+import { AgentId, DefaultAgentProfile } from '../../shared/agent';
 import {
   AuthType,
   OpenClawApi as OpenClawApiConst,
@@ -36,7 +37,7 @@ import {
 } from './openclawAgentModels';
 import { parseChannelSessionKey } from './openclawChannelSessionSync';
 import type { OpenClawEngineManager } from './openclawEngineManager';
-import { getMainAgentWorkspacePath } from './openclawMemoryFile';
+import { getMainAgentWorkspacePath, readBootstrapFile } from './openclawMemoryFile';
 
 const gwDiagTs = (): string => {
   const d = new Date();
@@ -2304,17 +2305,20 @@ export class OpenClawConfigSync {
     };
     const configuredAgents = this.getAgents?.() ?? [];
     const agentById = new Map(configuredAgents.map(agent => [agent.id, agent]));
-    if (!agentById.has('main')) {
-      agentById.set('main', {
-        id: 'main',
-        name: 'main',
+    if (!agentById.has(AgentId.Main)) {
+      agentById.set(AgentId.Main, {
+        id: AgentId.Main,
+        name: DefaultAgentProfile.Name,
         description: '',
         systemPrompt: '',
         identity: '',
         model: '',
+        workingDirectory: '',
         icon: '',
         skillIds: [],
         enabled: true,
+        pinned: false,
+        pinOrder: null,
         isDefault: true,
         source: 'custom',
         presetId: '',
@@ -2586,14 +2590,17 @@ export class OpenClawConfigSync {
     availableProviders?: Record<string, { models: Array<{ id: string }> }>,
   ): { list?: Array<Record<string, unknown>> } {
     const agents = this.getAgents?.() ?? [];
-    const mainAgent = agents.find(agent => agent.id === 'main');
+    const mainAgent = agents.find(agent => agent.id === AgentId.Main);
 
     const list: Array<Record<string, unknown>> = [
       mainAgent
         ? buildAgentEntry(mainAgent, defaultPrimaryModel, { availableProviders })
         : {
-            id: 'main',
+            id: AgentId.Main,
             default: true,
+            identity: {
+              name: DefaultAgentProfile.Name,
+            },
             model: {
               primary: defaultPrimaryModel,
             },
@@ -2698,15 +2705,16 @@ export class OpenClawConfigSync {
   }
 
   /**
-   * Sync workspace files (SOUL.md, IDENTITY.md, AGENTS.md) for each non-main agent.
+   * Sync workspace files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md) for each non-main agent.
    * The main agent's workspace is synced by `syncAgentsMd`. Non-main agents
    * get their own workspace directories under the openclaw state directory.
    */
-  private syncPerAgentWorkspaces(_mainWorkspaceDir: string, coworkConfig: CoworkConfig): void {
+  private syncPerAgentWorkspaces(mainWorkspaceDir: string, coworkConfig: CoworkConfig): void {
     const agents = this.getAgents?.() ?? [];
     // Use the openclaw state directory as base, matching OpenClaw's own fallback
     // logic: {STATE_DIR}/workspace-{agentId}/
     const stateDir = this.engineManager.getStateDir();
+    const userContent = readBootstrapFile(mainWorkspaceDir, 'USER.md');
 
     for (const agent of agents) {
       if (agent.id === 'main' || !agent.enabled) continue;
@@ -2724,6 +2732,10 @@ export class OpenClawConfigSync {
         const identityPath = path.join(agentWorkspace, 'IDENTITY.md');
         const identityContent = (agent.identity || '').trim();
         this.syncFileIfChanged(identityPath, identityContent ? `${identityContent}\n` : '');
+
+        // Sync USER.md — shared user profile from Settings > Personalization
+        const userPath = path.join(agentWorkspace, 'USER.md');
+        this.syncFileIfChanged(userPath, userContent);
 
         // Sync AGENTS.md for this agent (reuse same logic as main agent)
         this.syncAgentsMd(agentWorkspace, {

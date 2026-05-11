@@ -3,13 +3,14 @@
  * Configuration form for a single QQ bot instance in multi-instance mode
  */
 
-import React, { useState } from 'react';
 import { EyeIcon, EyeSlashIcon, XCircleIcon as XCircleIconSolid } from '@heroicons/react/20/solid';
 import { SignalIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import TrashIcon from '../icons/TrashIcon';
-import type { QQInstanceConfig, QQInstanceStatus, QQOpenClawConfig, IMConnectivityTestResult } from '../../types/im';
-import { i18nService } from '../../services/i18n';
 import { PlatformRegistry } from '@shared/platform';
+import React, { useState } from 'react';
+
+import { i18nService } from '../../services/i18n';
+import type { IMConnectivityTestResult,QQInstanceConfig, QQInstanceStatus, QQOpenClawConfig } from '../../types/im';
+import TrashIcon from '../icons/TrashIcon';
 
 interface QQInstanceSettingsProps {
   instance: QQInstanceConfig;
@@ -47,7 +48,7 @@ const QQInstanceSettings: React.FC<QQInstanceSettingsProps> = ({
   React.useEffect(() => {
     setNameValue(instance.instanceName);
     setEditingName(false);
-  }, [instance.instanceId]);
+  }, [instance.instanceId, instance.instanceName]);
 
   const handleNameBlur = () => {
     setEditingName(false);
@@ -161,7 +162,7 @@ const QQInstanceSettings: React.FC<QQInstanceSettingsProps> = ({
       {/* AppID */}
       <div className="space-y-1.5">
         <label className="block text-xs font-medium text-secondary">
-          AppID
+          AppID<span className="text-red-500 dark:text-red-400 ml-0.5">*</span>
         </label>
         <div className="relative">
           <input
@@ -190,7 +191,7 @@ const QQInstanceSettings: React.FC<QQInstanceSettingsProps> = ({
       {/* AppSecret */}
       <div className="space-y-1.5">
         <label className="block text-xs font-medium text-secondary">
-          AppSecret
+          AppSecret<span className="text-red-500 dark:text-red-400 ml-0.5">*</span>
         </label>
         <div className="relative">
           <input

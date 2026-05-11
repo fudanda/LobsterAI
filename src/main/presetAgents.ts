@@ -1,3 +1,4 @@
+import { AgentAvatarSvg, encodeAgentAvatarIcon } from '../shared/agent/avatar';
 import type { CreateAgentRequest } from './coworkStore';
 import { getLanguage } from './i18n';
 
@@ -13,6 +14,27 @@ export interface PresetAgent {
   skillIds: string[];
 }
 
+const PresetAgentIcon = {
+  StockExpert: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Data,
+  }),
+  ContentWriter: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Creation,
+  }),
+  LessonPlanner: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.GraduationCap,
+  }),
+  ContentSummarizer: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Document,
+  }),
+  HealthInterpreter: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Diagnosis,
+  }),
+  PetCare: encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Pet,
+  }),
+} as const;
+
 /**
  * Hardcoded preset agent templates.
  * Users can add these via the "Choose Preset" flow in the UI.
@@ -26,7 +48,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'stockexpert',
     name: '股票助手',
     nameEn: 'Stock Expert',
-    icon: '📈',
+    icon: PresetAgentIcon.StockExpert,
     description:
       'A 股公告追踪、个股深度分析、交易复盘；支持美港股行情、基本面、技术指标与风险评估。',
     descriptionEn:
@@ -71,7 +93,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'content-writer',
     name: '内容创作',
     nameEn: 'Content Writer',
-    icon: '✍️',
+    icon: PresetAgentIcon.ContentWriter,
     description:
       '一站式内容创作：选题、撰写、排版、润色，适用于文章、营销文案和社交媒体帖子。',
     descriptionEn:
@@ -120,7 +142,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'lesson-planner',
     name: '备课出卷专家',
     nameEn: 'Lesson Planner',
-    icon: '📚',
+    icon: PresetAgentIcon.LessonPlanner,
     description:
       '阅读教材和教学参考资料，生成教案、试卷、答案解析或英语听力原文。',
     descriptionEn:
@@ -159,7 +181,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'content-summarizer',
     name: '内容总结助手',
     nameEn: 'Content Summarizer',
-    icon: '📋',
+    icon: PresetAgentIcon.ContentSummarizer,
     description:
       '支持音视频、链接、文档摘要。自动识别会议、讲座、访谈等内容类型。',
     descriptionEn:
@@ -204,7 +226,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'health-interpreter',
     name: '医疗健康解读',
     nameEn: 'Health Interpreter',
-    icon: '🏥',
+    icon: PresetAgentIcon.HealthInterpreter,
     description:
       '体检报告、化验单、医学指标的通俗解读，帮你看懂每一项数值的含义和注意事项。',
     descriptionEn:
@@ -271,7 +293,7 @@ export const PRESET_AGENTS: PresetAgent[] = [
     id: 'pet-care',
     name: '萌宠管家',
     nameEn: 'Pet Care',
-    icon: '🐾',
+    icon: PresetAgentIcon.PetCare,
     description:
       '猫狗日常饲养、异常行为分析、食品配料解读，做你身边有温度的宠物百科。',
     descriptionEn:

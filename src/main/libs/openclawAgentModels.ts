@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { isDesignedAgentAvatarIcon } from '../../shared/agent/avatar';
 import type { Agent } from '../coworkStore';
 
 type BuildManagedAgentEntriesInput = {
@@ -180,18 +181,20 @@ export function buildAgentEntry(
     availableProviders: options?.availableProviders ?? {},
   });
   const primaryModel = qualified.status === 'qualified' ? qualified.primaryModel : fallbackPrimaryModel;
+  const legacyIcon = isDesignedAgentAvatarIcon(agent.icon) ? '' : agent.icon;
 
   return {
     id: agent.id,
     ...(agent.isDefault ? { default: true } : {}),
-    ...(agent.name || agent.icon ? {
+    ...(agent.name || legacyIcon ? {
       identity: {
         ...(agent.name ? { name: agent.name } : {}),
-        ...(agent.icon ? { emoji: agent.icon } : {}),
+        ...(legacyIcon ? { emoji: legacyIcon } : {}),
       },
     } : {}),
     ...(agent.skillIds && agent.skillIds.length > 0 ? { skills: agent.skillIds } : {}),
     ...(options?.workspace ? { workspace: options.workspace } : {}),
+    ...(agent.workingDirectory?.trim() ? { cwd: path.resolve(agent.workingDirectory.trim()) } : {}),
     model: {
       primary: primaryModel,
     },

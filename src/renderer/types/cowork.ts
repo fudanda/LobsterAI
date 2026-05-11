@@ -6,7 +6,15 @@ export interface CoworkImageAttachment {
 }
 
 // Cowork session status
-export type CoworkSessionStatus = 'idle' | 'running' | 'completed' | 'error';
+export const CoworkSessionStatusValue = {
+  Idle: 'idle',
+  Running: 'running',
+  Completed: 'completed',
+  Error: 'error',
+} as const;
+
+export type CoworkSessionStatus =
+  typeof CoworkSessionStatusValue[keyof typeof CoworkSessionStatusValue];
 
 // Cowork message types
 export type CoworkMessageType = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'system';
@@ -40,7 +48,16 @@ export interface CoworkMessageMetadata {
   isStreaming?: boolean;
   isFinal?: boolean;
   isThinking?: boolean;
-  skillIds?: string[];  // Skills used for this message
+  skillIds?: string[];
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  contextPercent?: number;
+  model?: string;
+  agentName?: string;
   [key: string]: unknown;
 }
 
@@ -60,6 +77,7 @@ export interface CoworkSession {
   claudeSessionId: string | null;
   status: CoworkSessionStatus;
   pinned: boolean;
+  pinOrder?: number | null;
   cwd: string;
   systemPrompt: string;
   modelOverride: string;
@@ -67,6 +85,10 @@ export interface CoworkSession {
   activeSkillIds: string[];
   agentId: string;
   messages: CoworkMessage[];
+  /** Offset of the first loaded message in the full message history. 0 means loaded from the beginning. */
+  messagesOffset: number;
+  /** Total number of messages stored for this session. */
+  totalMessages: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -185,6 +207,7 @@ export interface CoworkSessionSummary {
   title: string;
   status: CoworkSessionStatus;
   pinned: boolean;
+  pinOrder?: number | null;
   agentId?: string;
   createdAt: number;
   updatedAt: number;
@@ -221,6 +244,18 @@ export interface CoworkSessionResult {
 export interface CoworkSessionListResult {
   success: boolean;
   sessions?: CoworkSessionSummary[];
+  /** Whether more sessions exist beyond the currently loaded set. */
+  hasMore?: boolean;
+  error?: string;
+}
+
+export interface CoworkMessageListResult {
+  success: boolean;
+  messages?: CoworkMessage[];
+  /** Offset of the first returned message. */
+  offset?: number;
+  /** Total message count for the session. */
+  total?: number;
   error?: string;
 }
 

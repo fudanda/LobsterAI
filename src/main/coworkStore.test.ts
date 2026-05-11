@@ -20,6 +20,7 @@ vi.mock('electron', () => ({
 // ---------------------------------------------------------------------------
 import BetterSqlite3 from 'better-sqlite3';
 
+import { AgentAvatarSvg, DefaultAgentAvatarIcon, encodeAgentAvatarIcon } from '../shared/agent/avatar';
 import { CoworkStore } from './coworkStore';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,7 @@ function setupDb(): void {
       claude_session_id TEXT,
       status TEXT NOT NULL DEFAULT 'idle',
       pinned INTEGER NOT NULL DEFAULT 0,
+      pin_order INTEGER,
       cwd TEXT NOT NULL,
       system_prompt TEXT NOT NULL DEFAULT '',
       model_override TEXT NOT NULL DEFAULT '',
@@ -79,9 +81,12 @@ function setupDb(): void {
       system_prompt TEXT NOT NULL DEFAULT '',
       identity TEXT NOT NULL DEFAULT '',
       model TEXT NOT NULL DEFAULT '',
+      working_directory TEXT NOT NULL DEFAULT '',
       icon TEXT NOT NULL DEFAULT '',
       skill_ids TEXT NOT NULL DEFAULT '[]',
       enabled INTEGER NOT NULL DEFAULT 1,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      pin_order INTEGER,
       is_default INTEGER NOT NULL DEFAULT 0,
       source TEXT NOT NULL DEFAULT 'custom',
       preset_id TEXT NOT NULL DEFAULT '',
@@ -110,8 +115,8 @@ function setupDb(): void {
 function insertSession(id: string): void {
   const now = Date.now();
   db.prepare(
-    `INSERT INTO cowork_sessions (id, title, claude_session_id, status, pinned, cwd, system_prompt, execution_mode, active_skill_ids, agent_id, created_at, updated_at)
-     VALUES (?, 'test', NULL, 'idle', 0, '/tmp', '', 'local', '[]', 'main', ?, ?)`,
+    `INSERT INTO cowork_sessions (id, title, claude_session_id, status, pinned, pin_order, cwd, system_prompt, execution_mode, active_skill_ids, agent_id, created_at, updated_at)
+     VALUES (?, 'test', NULL, 'idle', 0, NULL, '/tmp', '', 'local', '[]', 'main', ?, ?)`,
   ).run(id, now, now);
 }
 
@@ -123,12 +128,12 @@ function insertMessage(
   content: string,
   metadata: string | null,
   sequence: number,
+  createdAt = Date.now(),
 ): void {
-  const now = Date.now();
   db.prepare(
     `INSERT INTO cowork_messages (id, session_id, type, content, metadata, created_at, sequence)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, sessionId, type, content, metadata, now, sequence);
+  ).run(id, sessionId, type, content, metadata, createdAt, sequence);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +169,32 @@ test('getSession returns all messages when one has corrupt metadata', () => {
   // Null metadata → undefined
   const nullMsg = session!.messages.find((m) => m.id === 'msg-null')!;
   expect(nullMsg.metadata).toBeUndefined();
+});
+
+test('replaceConversationMessages preserves existing timestamps and uses gateway timestamps', () => {
+  const sid = 'sess-replace-timestamps';
+  insertSession(sid);
+
+  insertMessage('msg-user', sid, 'user', 'old user', '{}', 1, 1000);
+  insertMessage('msg-assistant', sid, 'assistant', 'old assistant', '{}', 2, 2000);
+
+  store.replaceConversationMessages(sid, [
+    { role: 'user', text: 'old user' },
+    { role: 'assistant', text: 'old assistant' },
+    { role: 'user', text: 'new user', timestamp: 3000 },
+  ]);
+
+  const session = store.getSession(sid);
+  expect(session?.messages.map((message) => ({
+    type: message.type,
+    content: message.content,
+    timestamp: message.timestamp,
+  }))).toEqual([
+    { type: 'user', content: 'old user', timestamp: 1000 },
+    { type: 'assistant', content: 'old assistant', timestamp: 2000 },
+    { type: 'user', content: 'new user', timestamp: 3000 },
+  ]);
+  expect(session?.updatedAt).toBe(3000);
 });
 
 test('getSession returns all messages when ALL have corrupt metadata', () => {
@@ -221,6 +252,114 @@ test('no console.warn when all metadata is valid or null', () => {
   expect(warnSpy).not.toHaveBeenCalled();
 
   warnSpy.mockRestore();
+});
+
+test('updateMessage refreshes the session updated time', () => {
+  const sid = 'sess-update-time';
+  insertSession(sid);
+  insertMessage('msg-edit', sid, 'assistant', 'draft', null, 1);
+  db.prepare('UPDATE cowork_sessions SET updated_at = ? WHERE id = ?').run(1000, sid);
+  db.prepare('UPDATE cowork_messages SET created_at = ? WHERE id = ?').run(1000, 'msg-edit');
+
+  const beforeUpdate = Date.now();
+
+  store.updateMessage(sid, 'msg-edit', { content: 'final' });
+
+  const session = store.getSession(sid);
+  expect(session?.updatedAt).toBeGreaterThanOrEqual(beforeUpdate);
+  expect(session?.messages[0]?.content).toBe('final');
+});
+
+test('updateSession refreshes the session updated time by default', () => {
+  const sid = 'sess-update-session-time';
+  insertSession(sid);
+  db.prepare('UPDATE cowork_sessions SET updated_at = ? WHERE id = ?').run(1000, sid);
+
+  const beforeUpdate = Date.now();
+
+  store.updateSession(sid, { status: 'completed' });
+
+  const session = store.getSession(sid);
+  expect(session?.status).toBe('completed');
+  expect(session?.updatedAt).toBeGreaterThanOrEqual(beforeUpdate);
+});
+
+test('updateSession can patch model override without refreshing the session updated time', () => {
+  const sid = 'sess-model-only';
+  insertSession(sid);
+  db.prepare('UPDATE cowork_sessions SET updated_at = ? WHERE id = ?').run(1000, sid);
+
+  store.updateSession(
+    sid,
+    { modelOverride: 'lobsterai-server/qwen3.6-plus-YoudaoInner' },
+    { touchUpdatedAt: false },
+  );
+
+  const session = store.getSession(sid);
+  expect(session?.modelOverride).toBe('lobsterai-server/qwen3.6-plus-YoudaoInner');
+  expect(session?.updatedAt).toBe(1000);
+});
+
+test('agent CRUD stores working directory independently', () => {
+  const agent = store.createAgent({
+    name: 'Docs Agent',
+    model: 'openai/gpt-4o',
+    workingDirectory: '/tmp/docs-project',
+  });
+
+  expect(agent.workingDirectory).toBe('/tmp/docs-project');
+
+  const updated = store.updateAgent(agent.id, {
+    workingDirectory: '/tmp/docs-next',
+  });
+
+  expect(updated?.workingDirectory).toBe('/tmp/docs-next');
+  expect(store.getAgent(agent.id)?.workingDirectory).toBe('/tmp/docs-next');
+});
+
+test('agent CRUD normalizes legacy icons to the default svg avatar', () => {
+  const designedIcon = encodeAgentAvatarIcon({
+    svg: AgentAvatarSvg.Artboard,
+  });
+
+  const missingIconAgent = store.createAgent({ name: 'Missing Icon Agent' });
+  const legacyIconAgent = store.createAgent({ name: 'Legacy Icon Agent', icon: 'legacy-icon' });
+  const legacyDesignedIconAgent = store.createAgent({
+    name: 'Legacy Designed Icon Agent',
+    icon: 'agent-avatar:blue:code',
+  });
+  const designedIconAgent = store.createAgent({ name: 'Designed Icon Agent', icon: designedIcon });
+
+  expect(missingIconAgent.icon).toBe(DefaultAgentAvatarIcon);
+  expect(legacyIconAgent.icon).toBe(DefaultAgentAvatarIcon);
+  expect(legacyDesignedIconAgent.icon).toBe(DefaultAgentAvatarIcon);
+  expect(designedIconAgent.icon).toBe(designedIcon);
+
+  const updated = store.updateAgent(designedIconAgent.id, { icon: 'legacy-icon' });
+  expect(updated?.icon).toBe(DefaultAgentAvatarIcon);
+});
+
+test('agent pinning stores first-pinned-first order', () => {
+  const first = store.createAgent({ name: 'First Agent' });
+  const second = store.createAgent({ name: 'Second Agent' });
+
+  const pinnedFirst = store.updateAgent(first.id, { pinned: true });
+  const pinnedSecond = store.updateAgent(second.id, { pinned: true });
+
+  expect(pinnedFirst?.pinned).toBe(true);
+  expect(pinnedSecond?.pinned).toBe(true);
+  expect(pinnedFirst?.pinOrder).toBe(1);
+  expect(pinnedSecond?.pinOrder).toBe(2);
+});
+
+test('agent unpinning clears pin order', () => {
+  const agent = store.createAgent({ name: 'Pinned Agent' });
+  store.updateAgent(agent.id, { pinned: true });
+
+  const unpinned = store.updateAgent(agent.id, { pinned: false });
+
+  expect(unpinned?.pinned).toBe(false);
+  expect(unpinned?.pinOrder).toBeNull();
 });
 
 test('getConfig defaults skipMissedJobs to true when config is missing', () => {

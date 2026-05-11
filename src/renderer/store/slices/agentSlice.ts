@@ -6,7 +6,10 @@ interface AgentSummary {
   description: string;
   icon: string;
   model: string;
+  workingDirectory: string;
   enabled: boolean;
+  pinned: boolean;
+  pinOrder?: number | null;
   isDefault: boolean;
   source: 'custom' | 'preset';
   skillIds: string[];

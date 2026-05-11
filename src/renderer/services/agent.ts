@@ -1,3 +1,5 @@
+import { AgentId } from '@shared/agent';
+
 import { store } from '../store';
 import {
   addAgent,
@@ -24,7 +26,10 @@ class AgentService {
           description: a.description,
           icon: a.icon,
           model: a.model ?? '',
+          workingDirectory: a.workingDirectory ?? '',
           enabled: a.enabled,
+          pinned: a.pinned ?? false,
+          pinOrder: a.pinOrder ?? null,
           isDefault: a.isDefault,
           source: a.source,
           skillIds: a.skillIds ?? [],
@@ -44,6 +49,7 @@ class AgentService {
     systemPrompt?: string;
     identity?: string;
     model?: string;
+    workingDirectory?: string;
     icon?: string;
     skillIds?: string[];
   }): Promise<Agent | null> {
@@ -56,7 +62,10 @@ class AgentService {
           description: agent.description,
           icon: agent.icon,
           model: agent.model ?? '',
+          workingDirectory: agent.workingDirectory ?? '',
           enabled: agent.enabled,
+          pinned: agent.pinned ?? false,
+          pinOrder: agent.pinOrder ?? null,
           isDefault: agent.isDefault,
           source: agent.source,
           skillIds: agent.skillIds ?? [],
@@ -76,9 +85,11 @@ class AgentService {
     systemPrompt?: string;
     identity?: string;
     model?: string;
+    workingDirectory?: string;
     icon?: string;
     skillIds?: string[];
     enabled?: boolean;
+    pinned?: boolean;
   }): Promise<Agent | null> {
     try {
       const agent = await window.electron?.agents?.update(id, updates);
@@ -90,7 +101,10 @@ class AgentService {
             description: agent.description,
             icon: agent.icon,
             model: agent.model ?? '',
+            workingDirectory: agent.workingDirectory ?? '',
             enabled: agent.enabled,
+            pinned: agent.pinned ?? false,
+            pinOrder: agent.pinOrder ?? null,
             skillIds: agent.skillIds ?? [],
           },
         }));
@@ -106,13 +120,16 @@ class AgentService {
   async deleteAgent(id: string): Promise<boolean> {
     try {
       const wasCurrentAgent = store.getState().agent.currentAgentId === id;
-      await window.electron?.agents?.delete(id);
+      const deleted = await window.electron?.agents?.delete(id);
+      if (!deleted) {
+        return false;
+      }
       store.dispatch(removeAgent(id));
       store.dispatch(clearAgentSelectedModel(id));
       if (wasCurrentAgent) {
-        this.switchAgent('main');
+        this.switchAgent(AgentId.Main);
         const { coworkService } = await import('./cowork');
-        coworkService.loadSessions('main');
+        coworkService.loadSessions(AgentId.Main);
       }
       return true;
     } catch (error) {
@@ -131,6 +148,16 @@ class AgentService {
     }
   }
 
+  async getPresetTemplates(): Promise<PresetAgent[]> {
+    try {
+      const presets = await window.electron?.agents?.presetTemplates();
+      return presets ?? [];
+    } catch (error) {
+      console.error('Failed to get preset agent templates:', error);
+      return [];
+    }
+  }
+
   async addPreset(presetId: string): Promise<Agent | null> {
     try {
       const agent = await window.electron?.agents?.addPreset(presetId);
@@ -141,7 +168,10 @@ class AgentService {
           description: agent.description,
           icon: agent.icon,
           model: agent.model ?? '',
+          workingDirectory: agent.workingDirectory ?? '',
           enabled: agent.enabled,
+          pinned: agent.pinned ?? false,
+          pinOrder: agent.pinOrder ?? null,
           isDefault: agent.isDefault,
           source: agent.source,
           skillIds: agent.skillIds ?? [],
