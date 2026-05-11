@@ -1,0 +1,74 @@
+{
+  "test": {
+    "version": "2027.5.11",
+    "date": "2027-05-11",
+    "changeLog": {
+      "ch": {
+        "title": "测试版本更新",
+        "content": [
+          "我要更新，我要更新，我要更新",
+          "我的更新，我的更新，我的更新",
+          "修复 markdown 表格偶尔渲染失败、表格内容串行的问题",
+          "修复 IM 任务中切换模型不生效的问题",
+          "修复 Qwen 3.6 Plus 不支持图像输入的问题",
+          "修复企业微信 dmPolicy / allowFrom 配置被硬编码、用户配置不生效的问题",
+          "修复 Windows 下删除 / 安装技能时偶发的 EPERM 权限错误",
+          "统一技能导入成功提示，并稳定 ClawHub 导入时的工作目录",
+          "日志优化"
+        ]
+      },
+      "en": {
+        "title": "Test Release",
+        "content": [
+          "Serve update metadata from the Go Fiber update API.",
+          "Keep the existing desktop update response contract."
+        ]
+      }
+    },
+    "macIntel": {
+      "url": "https://lobsterai.inner.youdao.com/#/download-list"
+    },
+    "macArm": {
+      "url": "https://lobsterai.inner.youdao.com/#/download-list"
+    },
+    "windowsX64": {
+      "url": "https://ydschool-video.nosdn.127.net/1777139464901LobsterAI+Setup+2026.4.25.exe"
+    }
+  },
+  "prod": {
+    "version": "2027.5.11",
+    "date": "2027-05-11",
+    "changeLog": {
+      "ch": {
+        "title": "版本更新",
+        "content": [
+          "我要更新，我要更新，我要更新",
+          "我的更新，我的更新，我的更新",
+          "修复 markdown 表格偶尔渲染失败、表格内容串行的问题",
+          "修复 IM 任务中切换模型不生效的问题",
+          "修复 Qwen 3.6 Plus 不支持图像输入的问题",
+          "修复企业微信 dmPolicy / allowFrom 配置被硬编码、用户配置不生效的问题",
+          "修复 Windows 下删除 / 安装技能时偶发的 EPERM 权限错误",
+          "统一技能导入成功提示，并稳定 ClawHub 导入时的工作目录",
+          "日志优化"
+        ]
+      },
+      "en": {
+        "title": "Release Notes",
+        "content": [
+          "Serve update metadata from the Go Fiber update API.",
+          "Keep the existing desktop update response contract."
+        ]
+      }
+    },
+    "macIntel": {
+      "url": "https://lobsterai.youdao.com/#/download-list"
+    },
+    "macArm": {
+      "url": "https://lobsterai.youdao.com/#/download-list"
+    },
+    "windowsX64": {
+      "url": "https://ydschool-video.nosdn.127.net/1777139464901LobsterAI+Setup+2026.4.25.exe"
+    }
+  }
+}

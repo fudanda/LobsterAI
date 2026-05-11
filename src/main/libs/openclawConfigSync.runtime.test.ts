@@ -760,6 +760,65 @@ describe('OpenClawConfigSync runtime config output', () => {
     expect(config.plugins.entries['nimsuite-openclaw-nim-channel']).toEqual({ enabled: true });
   });
 
+  test('removes stale plugin slots when referenced plugin is missing', async () => {
+    const { OpenClawConfigSync } = await import('./openclawConfigSync');
+
+    fs.writeFileSync(configPath, JSON.stringify({
+      plugins: {
+        slots: {
+          memory: 'memory-core',
+        },
+        entries: {
+          'mcp-bridge': { enabled: true },
+        },
+      },
+    }, null, 2));
+
+    const sync = new OpenClawConfigSync({
+      engineManager: {
+        getConfigPath: () => configPath,
+        getGatewayToken: () => 'gateway-token',
+        getStateDir: () => stateDir,
+        getBaseDir: () => tmpDir,
+      } as never,
+      getCoworkConfig: () => ({
+        workingDirectory: tmpDir,
+        systemPrompt: '',
+        executionMode: 'local',
+        agentEngine: 'openclaw',
+        memoryEnabled: false,
+        memoryImplicitUpdateEnabled: false,
+        memoryLlmJudgeEnabled: false,
+        memoryGuardLevel: 'balanced',
+        memoryUserMemoriesMaxItems: 100,
+        skipMissedJobs: false,
+      }),
+      isEnterprise: () => false,
+      getTelegramInstances: () => [],
+      getDiscordOpenClawConfig: () => null,
+      getDingTalkInstances: () => [],
+      getFeishuInstances: () => [],
+      getQQInstances: () => [],
+      getWecomConfig: () => null,
+      getWecomInstances: () => [],
+      getPopoInstances: () => [],
+      getEmailOpenClawConfig: () => ({ instances: [] }),
+      getNimInstances: () => [],
+      getNeteaseBeeChanConfig: () => null,
+      getWeixinConfig: () => null,
+      getIMSettings: () => null,
+      getSkillsList: () => [],
+      getAgents: () => [],
+    } as never);
+
+    const result = sync.sync('remove-stale-plugin-slots');
+    expect(result.ok).toBe(true);
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    expect(config.plugins).toBeDefined();
+    expect(config.plugins.slots).toBeUndefined();
+  });
+
   test('writes weixin channel config using dmPolicy and allowFrom instead of unsupported accountId', async () => {
     const { OpenClawConfigSync } = await import('./openclawConfigSync');
 

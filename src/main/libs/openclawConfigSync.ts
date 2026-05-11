@@ -217,6 +217,47 @@ const DISABLED_MANAGED_SKILL_NAMES = Object.entries(MANAGED_SKILL_ENTRY_OVERRIDE
   .filter(([, value]) => value.enabled === false)
   .map(([name]) => name);
 
+const sanitizePluginSlots = (
+  slots: unknown,
+  validPluginIds: Set<string>,
+): Record<string, unknown> => {
+  if (!slots || typeof slots !== 'object' || Array.isArray(slots)) {
+    return {};
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [slotName, slotValue] of Object.entries(slots as Record<string, unknown>)) {
+    if (typeof slotValue === 'string') {
+      if (validPluginIds.has(slotValue)) {
+        sanitized[slotName] = slotValue;
+      }
+      continue;
+    }
+
+    if (Array.isArray(slotValue)) {
+      const filtered = slotValue.filter((item): item is string => (
+        typeof item === 'string' && validPluginIds.has(item)
+      ));
+      if (filtered.length > 0) {
+        sanitized[slotName] = filtered;
+      }
+      continue;
+    }
+
+    if (slotValue && typeof slotValue === 'object') {
+      const slotRecord = slotValue as Record<string, unknown>;
+      const pluginId = typeof slotRecord.plugin === 'string'
+        ? slotRecord.plugin
+        : (typeof slotRecord.id === 'string' ? slotRecord.id : '');
+      if (pluginId && validPluginIds.has(pluginId)) {
+        sanitized[slotName] = slotValue;
+      }
+    }
+  }
+
+  return sanitized;
+};
+
 /**
  * Build the env var name for a provider's apiKey.
  * Must match the key format produced by resolveAllProviderApiKeys() in claudeSettings.ts.
@@ -1184,6 +1225,9 @@ export class OpenClawConfigSync {
 
     const mainWorkspacePath = getMainAgentWorkspacePath(this.engineManager.getStateDir());
     const taskWorkingDirectory = (coworkConfig.workingDirectory || '').trim();
+    const resolvedTaskWorkingDirectory = taskWorkingDirectory
+      ? path.resolve(taskWorkingDirectory)
+      : '';
     ensureDir(mainWorkspacePath);
 
     const preinstalledPlugins = readPreinstalledPlugins();
@@ -1316,7 +1360,12 @@ export class OpenClawConfigSync {
             },
           } : {}),
         },
-        ...this.buildAgentsList(primaryModel, this.engineManager.getStateDir(), availableProviders),
+        ...this.buildAgentsList(
+          primaryModel,
+          this.engineManager.getStateDir(),
+          availableProviders,
+          resolvedTaskWorkingDirectory,
+        ),
       },
       ...this.currentBindingsObj,
       session: this.buildSessionConfig(),
@@ -1420,6 +1469,11 @@ export class OpenClawConfigSync {
           'acpx': { enabled: false },
         };
 
+        const sanitizedSlots = sanitizePluginSlots(
+          existingPlugins.slots,
+          new Set(Object.keys(pluginEntries)),
+        );
+
         return Object.keys(pluginEntries).length > 0
           ? {
               plugins: {
@@ -1441,6 +1495,11 @@ export class OpenClawConfigSync {
                 // a removed plugin causes "Config invalid: plugin not found" errors.
                 deny: [],
                 entries: pluginEntries,
+                // Drop stale slot mappings (for example memory-core) when the
+                // referenced plugin is no longer available in this runtime.
+                ...(Object.keys(sanitizedSlots).length > 0
+                  ? { slots: sanitizedSlots }
+                  : { slots: undefined }),
               },
             }
           : {};
@@ -2588,23 +2647,38 @@ export class OpenClawConfigSync {
     defaultPrimaryModel: string,
     stateDir?: string,
     availableProviders?: Record<string, { models: Array<{ id: string }> }>,
+    defaultMainAgentWorkingDirectory?: string,
   ): { list?: Array<Record<string, unknown>> } {
     const agents = this.getAgents?.() ?? [];
     const mainAgent = agents.find(agent => agent.id === AgentId.Main);
+    const mainAgentWorkingDirectory = (
+      mainAgent?.workingDirectory?.trim()
+      || defaultMainAgentWorkingDirectory?.trim()
+      || ''
+    );
+
+    const mainAgentEntry = mainAgent
+      ? buildAgentEntry(
+          mainAgentWorkingDirectory
+            ? { ...mainAgent, workingDirectory: mainAgentWorkingDirectory }
+            : mainAgent,
+          defaultPrimaryModel,
+          { availableProviders },
+        )
+      : {
+          id: AgentId.Main,
+          default: true,
+          identity: {
+            name: DefaultAgentProfile.Name,
+          },
+          ...(mainAgentWorkingDirectory ? { cwd: mainAgentWorkingDirectory } : {}),
+          model: {
+            primary: defaultPrimaryModel,
+          },
+        };
 
     const list: Array<Record<string, unknown>> = [
-      mainAgent
-        ? buildAgentEntry(mainAgent, defaultPrimaryModel, { availableProviders })
-        : {
-            id: AgentId.Main,
-            default: true,
-            identity: {
-              name: DefaultAgentProfile.Name,
-            },
-            model: {
-              primary: defaultPrimaryModel,
-            },
-          },
+      mainAgentEntry,
       ...buildManagedAgentEntries({
         agents,
         fallbackPrimaryModel: defaultPrimaryModel,

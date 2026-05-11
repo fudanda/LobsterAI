@@ -1,0 +1,50 @@
+package routes
+
+import (
+	"log"
+
+	"github.com/goravel/framework/contracts/http"
+	"github.com/goravel/framework/support"
+
+	"goravel/app/facades"
+	"goravel/app/http/controllers"
+)
+
+func Web() {
+	facades.Route().Get("/", func(ctx http.Context) http.Response {
+		return ctx.Response().View().Make("welcome.tmpl", map[string]any{
+			"version": support.Version,
+		})
+	})
+
+	facades.Route().Static("public", "./public")
+
+	userController := controllers.NewUserController()
+	facades.Route().Get("/users", userController.Index)
+
+	updateController, err := controllers.NewUpdateController()
+	if err != nil {
+		log.Fatalf("[UpdateAPI] failed to initialize update service: %v", err)
+	}
+	authController, err := controllers.NewAuthController()
+	if err != nil {
+		log.Fatalf("[AuthAPI] failed to initialize auth service: %v", err)
+	}
+
+	basePath := "/openapi/get/luna/hardware/lobsterai"
+	facades.Route().Get("/healthz", updateController.Healthz)
+	facades.Route().Get(basePath+"/test/update", updateController.GetTestUpdate)
+	facades.Route().Get(basePath+"/test/update-manual", updateController.GetTestUpdateManual)
+	facades.Route().Get(basePath+"/prod/update", updateController.GetProdUpdate)
+	facades.Route().Get(basePath+"/prod/update-manual", updateController.GetProdUpdateManual)
+	facades.Route().Get(basePath+"/test/login-url", authController.GetTestLoginURL)
+	facades.Route().Get(basePath+"/prod/login-url", authController.GetProdLoginURL)
+	facades.Route().Get("/mock-login", authController.MockLogin)
+	facades.Route().Post("/api/auth/exchange", authController.Exchange)
+	facades.Route().Post("/api/auth/refresh", authController.Refresh)
+	facades.Route().Post("/api/auth/logout", authController.Logout)
+	facades.Route().Get("/api/user/profile", authController.GetProfile)
+	facades.Route().Get("/api/user/quota", authController.GetQuota)
+	facades.Route().Get("/api/user/profile-summary", authController.GetProfileSummary)
+	facades.Route().Get("/api/models/available", authController.GetModels)
+}

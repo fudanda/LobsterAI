@@ -1,0 +1,6 @@
+{
+  "last_turn_at": "2026-05-11T05:48:56.090Z",
+  "turn_count": 10,
+  "last_progress_at": "2026-05-11T05:48:56.090Z",
+  "last_agent_output": "已回退。\n\n我把刚才这次为 `cwd` 兼容做的改动撤回了，恢复到回退前行为（会继续写 `cwd` 到配置）：\n- [openclawAgentModels.ts](/D:/LobsterAI/src"
+}

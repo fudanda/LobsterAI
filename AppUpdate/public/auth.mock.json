@@ -1,0 +1,100 @@
+{
+  "test": {
+    "user": {
+      "yid": "mock-test-yid",
+      "nickname": "测试账号-test",
+      "avatarUrl": "https://gravatar.com/avatar/9c2e3409d8acbc8990bc586a11ea9ffe?s=400&d=robohash&r=x",
+      "phone": "13800138000",
+      "userId": "10001",
+      "id": 10001,
+      "status": 1
+    },
+    "quota": {
+      "planName": "测试计划",
+      "subscriptionStatus": "active",
+      "creditsLimit": 2000,
+      "creditsUsed": 120,
+      "creditsRemaining": 1880
+    },
+    "profileSummary": {
+      "id": 10001,
+      "nickname": "测试账号-test",
+      "avatarUrl": "https://gravatar.com/avatar/9c2e3409d8acbc8990bc586a11ea9ffe?s=400&d=robohash&r=x",
+      "totalCreditsRemaining": 1880,
+      "creditItems": [
+        {
+          "type": "subscription",
+          "label": "测试标准版",
+          "labelEn": "Test Standard",
+          "creditsRemaining": 1600,
+          "expiresAt": "2026-12-31"
+        },
+        {
+          "type": "boost",
+          "label": "测试加油包",
+          "labelEn": "Test Boost",
+          "creditsRemaining": 280,
+          "expiresAt": "2026-08-31"
+        }
+      ]
+    },
+    "models": [
+      {
+        "modelId": "mock-test-model",
+        "modelName": "Mock Test Model",
+        "provider": "lobsterai-mock",
+        "apiFormat": "openai",
+        "supportsImage": true
+      }
+    ]
+  },
+  "prod": {
+    "user": {
+      "yid": "mock-prod-yid",
+      "nickname": "测试账号-prod",
+      "avatarUrl": "https://gravatar.com/avatar/9c2e3409d8acbc8990bc586a11ea9ffe?s=400&d=robohash&r=x",
+      "phone": "13900139000",
+      "userId": "20001",
+      "id": 20001,
+      "status": 1
+    },
+    "quota": {
+      "planName": "生产计划",
+      "subscriptionStatus": "active",
+      "creditsLimit": 5000,
+      "creditsUsed": 300,
+      "creditsRemaining": 4700
+    },
+    "profileSummary": {
+      "id": 20001,
+      "nickname": "测试账号-prod",
+      "avatarUrl": "https://gravatar.com/avatar/9c2e3409d8acbc8990bc586a11ea9ffe?s=400&d=robohash&r=x",
+      "totalCreditsRemaining": 4700,
+      "creditItems": [
+        {
+          "type": "subscription",
+          "label": "生产专业版",
+          "labelEn": "Prod Professional",
+          "creditsRemaining": 4300,
+          "expiresAt": "2026-12-31"
+        },
+        {
+          "type": "free",
+          "label": "免费额度",
+          "labelEn": "Free Credits",
+          "creditsRemaining": 400,
+          "expiresAt": "2026-06-30"
+        }
+      ]
+    },
+    "models": [
+      {
+        "modelId": "mock-prod-model",
+        "modelName": "Mock Prod Model",
+        "provider": "lobsterai-mock",
+        "apiFormat": "openai",
+        "supportsImage": false
+      }
+    ]
+  }
+}

@@ -167,6 +167,78 @@ describe('enterpriseConfigSync', () => {
     ]);
   });
 
+  test('syncEnterpriseConfig maps agents.list main.cwd to cowork workingDirectory', async () => {
+    const configDir = path.join(tmpDir, 'enterprise-config');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, 'manifest.json'),
+      JSON.stringify({
+        version: '1.0.0',
+        name: 'Test',
+        sync: { openclaw: true, skills: false, agents: false, mcp: false },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(configDir, 'openclaw.json'),
+      JSON.stringify({
+        agents: {
+          defaults: {
+            workspace: '/state/workspace-main',
+            sandbox: { mode: 'off' },
+          },
+          list: [
+            {
+              id: 'main',
+              cwd: '/projects/list-main-cwd',
+            },
+          ],
+        },
+      }),
+    );
+
+    const mod = await import('./enterpriseConfigSync');
+    const coworkUpdates: Array<Record<string, string>> = [];
+
+    mod.syncEnterpriseConfig(
+      configDir,
+      { get: () => undefined, set: () => undefined } as any,
+      {
+        setTelegramOpenClawConfig: () => undefined,
+        setDiscordOpenClawConfig: () => undefined,
+        getFeishuInstances: () => [],
+        setFeishuInstanceConfig: () => undefined,
+        setFeishuOpenClawConfig: () => undefined,
+        getDingTalkInstances: () => [],
+        setDingTalkInstanceConfig: () => undefined,
+        setDingTalkOpenClawConfig: () => undefined,
+        getQQInstances: () => [],
+        setQQInstanceConfig: () => undefined,
+        setQQConfig: () => undefined,
+        getWecomInstances: () => [],
+        setWecomInstanceConfig: () => undefined,
+        setWecomConfig: () => undefined,
+        setPopoConfig: () => undefined,
+        setNimConfig: () => undefined,
+        setWeixinConfig: () => undefined,
+        setNeteaseBeeChanConfig: () => undefined,
+      } as any,
+      () => undefined,
+      () => undefined,
+      (updates) => {
+        coworkUpdates.push(updates);
+      },
+      () => undefined,
+    );
+
+    expect(coworkUpdates).toEqual([
+      {
+        agentEngine: 'openclaw',
+        executionMode: 'local',
+        workingDirectory: '/projects/list-main-cwd',
+      },
+    ]);
+  });
+
   test('syncEnterpriseConfig updates existing WeCom instances when syncing channels', async () => {
     const configDir = path.join(tmpDir, 'enterprise-config');
     fs.mkdirSync(configDir, { recursive: true });

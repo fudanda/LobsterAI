@@ -52,7 +52,7 @@ import { saveCoworkApiConfig } from './libs/coworkConfigStore';
 import { getCoworkLogPath } from './libs/coworkLogger';
 import { registerProxyTokenRefresher, startCoworkOpenAICompatProxy, stopCoworkOpenAICompatProxy } from './libs/coworkOpenAICompatProxy';
 import { generateSessionTitle, probeCoworkModelReadiness } from './libs/coworkUtil';
-import { getServerApiBaseUrl, getSkillStoreUrl, refreshEndpointsTestMode } from './libs/endpoints';
+import { getLoginOvermindUrl, getMockLoginUrl, getPortalLoginUrl, getServerApiBaseUrl, getSkillStoreUrl, refreshEndpointsTestMode } from './libs/endpoints';
 import { mergeEnterpriseOpenclawConfig, resolveEnterpriseConfigPath, syncEnterpriseConfig } from './libs/enterpriseConfigSync';
 import { exportLogsZip } from './libs/logExport';
 import { McpBridgeServer } from './libs/mcpBridgeServer';
@@ -2029,7 +2029,25 @@ if (!gotTheLock) {
   app.quit();
 } else {
   // Register custom protocol for OAuth callback
-  app.setAsDefaultProtocolClient('lobsterai');
+  const registerDeepLinkProtocol = (): void => {
+    let registered = false;
+    if (process.defaultApp) {
+      // In development, Electron must register with both execPath and app entry path.
+      // Otherwise Windows may treat the deep link itself as an app path and fail to launch.
+      const appEntryPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+      if (appEntryPath) {
+        registered = app.setAsDefaultProtocolClient('lobsterai', process.execPath, [appEntryPath]);
+      } else {
+        registered = app.setAsDefaultProtocolClient('lobsterai', process.execPath);
+      }
+    } else {
+      registered = app.setAsDefaultProtocolClient('lobsterai');
+    }
+
+    const isDefault = app.isDefaultProtocolClient('lobsterai');
+    console.log(`[Auth] protocol registration: registered=${registered}, default=${isDefault}, defaultApp=${Boolean(process.defaultApp)}`);
+  };
+  registerDeepLinkProtocol();
 
   // Buffer for deep link auth code received before renderer is ready
   let pendingAuthCode: string | null = null;
@@ -2368,10 +2386,68 @@ if (!gotTheLock) {
     };
   };
 
+  const fetchLoginUrlFromEndpoint = async (): Promise<string | null> => {
+    const url = getLoginOvermindUrl();
+    console.log(`[Auth] fetching login URL from: ${url}`);
+    try {
+      const response = await net.fetch(url, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        console.warn(`[Auth] login-url endpoint returned status ${response.status}`);
+        return null;
+      }
+
+      const body = await response.json() as {
+        code?: number;
+        message?: string;
+        data?: {
+          value?: unknown;
+        };
+      };
+      if (body.code !== undefined && body.code !== 0) {
+        console.warn(`[Auth] login-url endpoint returned business code ${body.code}: ${body.message ?? ''}`);
+        return null;
+      }
+      const value = body?.data?.value;
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+      console.warn('[Auth] login-url endpoint returned empty value');
+      return null;
+    } catch (error) {
+      console.error('[Auth] Failed to fetch login URL from endpoint:', error);
+      return null;
+    }
+  };
+
+  const appendSourceQuery = (rawUrl: string): string => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    try {
+      const parsed = new URL(trimmed);
+      if (!parsed.searchParams.has('source')) {
+        parsed.searchParams.set('source', 'electron');
+      }
+      return parsed.toString();
+    } catch {
+      const joiner = trimmed.includes('?') ? '&' : '?';
+      return `${trimmed}${joiner}source=electron`;
+    }
+  };
+
   ipcMain.handle('auth:login', async (_event, { loginUrl }: { loginUrl?: string } = {}) => {
     try {
-      const baseUrl = loginUrl || `${getServerApiBaseUrl()}/login`;
-      const finalUrl = `${baseUrl}?source=electron`;
+      const providedLoginUrl = typeof loginUrl === 'string' ? loginUrl.trim() : '';
+      const endpointLoginUrl = providedLoginUrl ? null : await fetchLoginUrlFromEndpoint();
+      const mockLoginUrl = providedLoginUrl || endpointLoginUrl ? null : getMockLoginUrl();
+      const baseUrl = providedLoginUrl || endpointLoginUrl || mockLoginUrl || getPortalLoginUrl();
+      const finalUrl = appendSourceQuery(baseUrl);
+      console.log(`[Auth] opening login URL: ${finalUrl}`);
       await shell.openExternal(finalUrl);
       return { success: true };
     } catch (error) {
